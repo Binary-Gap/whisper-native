@@ -18,7 +18,7 @@ downloaded.
 - Filler-word removal (uh, hmm, um)
 - Optional line wrapping / sentence-per-line output
 - Transcription history
-- iTerm2 integration (caret-aware text placement)
+- iTerm2 integration: text goes to the session you started recording in, with optional auto-submit
 
 ## Install
 
@@ -89,6 +89,24 @@ same. Paste will silently stop working; reset and re-grant Accessibility:
 ```sh
 tccutil reset Accessibility io.binarygap.whisper-native
 ```
+
+## iTerm2 (optional)
+
+Out of the box, dictation into iTerm2 uses the same Cmd+V paste as any other
+app. The iTerm2 integration sends the text straight to the session you
+started recording in (even if you switch windows while it transcribes) and
+can press Enter for you (Settings > Transcription > "Auto-submit in
+terminal"). It talks to iTerm2's Python API, so it needs:
+
+1. iTerm2 > Settings > General > Magic > **Enable Python API**.
+2. The `iterm2` Python package in the interpreter the app uses: `python3`
+   from [mise](https://mise.jdx.dev) if installed, else `/usr/bin/python3`:
+
+   ```sh
+   python3 -m pip install --user iterm2
+   ```
+
+If either is missing, the app falls back to paste.
 
 ## Uninstall
 
