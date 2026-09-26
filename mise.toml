@@ -1,0 +1,140 @@
+[env]
+# DEVELOPMENT_TEAM for code signing, consumed by project.yml as ${APPLE_TEAM_ID}.
+# Empty = local unsigned/dev build. Set your real team id in a gitignored
+# mise.local.toml to sign with your own identity.
+APPLE_TEAM_ID = ""
+
+# Debug build code-sign identity, consumed by project.yml as ${DEBUG_SIGN_IDENTITY}.
+# "-" = ad-hoc signing, no Apple Development cert needed; this is what lets a
+# fresh clone build without a cert. A maintainer overrides this to
+# "Apple Development" (alongside APPLE_TEAM_ID) in gitignored mise.local.toml,
+# which keeps the Debug build's accessibility TCC grant stable across rebuilds.
+DEBUG_SIGN_IDENTITY = "-"
+
+# Pinned whisper.cpp release. Bump here to upgrade the bundled server binary.
+WHISPER_CPP_TAG = "v1.9.1"
+
+# NOTE: setting `includes` REPLACES mise's default file-task dirs.
+# Pulls in the signing/notarization/release tasks (fastlane/ is gitignored).
+# A missing include path is silently ignored by mise, so a fresh clone
+# without fastlane/ still loads every task below.
+[task_config]
+includes = ["fastlane/mise_tasks.toml"]
+
+[tasks."whisper:fetch"]
+description = "Shallow-clone the pinned whisper.cpp release into external/"
+outputs = ["external/whisper.cpp/CMakeLists.txt"]
+run = '''
+set -euo pipefail
+dest="external/whisper.cpp"
+if [ -d "$dest/.git" ]; then
+  current="$(git -C "$dest" describe --tags --exact-match 2>/dev/null || echo "")"
+  if [ "$current" = "$WHISPER_CPP_TAG" ]; then
+    echo "whisper.cpp already at $WHISPER_CPP_TAG"
+    exit 0
+  fi
+  echo "whisper.cpp tag mismatch (have '$current', want '$WHISPER_CPP_TAG'), re-cloning"
+  rm -rf "$dest"
+fi
+mkdir -p external
+git clone --depth 1 --branch "$WHISPER_CPP_TAG" https://github.com/ggerganov/whisper.cpp.git "$dest"
+'''
+
+[tasks."whisper:build"]
+description = "Build whisper-server (Metal, Release) from external/whisper.cpp"
+depends = ["whisper:fetch"]
+sources = ["external/whisper.cpp/CMakeLists.txt"]
+outputs = ["external/whisper.cpp/build/bin/whisper-server"]
+run = '''
+set -euo pipefail
+src="external/whisper.cpp"
+cmake -S "$src" -B "$src/build" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGGML_METAL=ON \
+  -DWHISPER_COREML=OFF \
+  -DWHISPER_BUILD_TESTS=OFF \
+  -DWHISPER_BUILD_EXAMPLES=ON
+cmake --build "$src/build" --target whisper-server --config Release -j
+echo "Built: $src/build/bin/whisper-server"
+'''
+
+[tasks."ai:whisper:build"]
+quiet = true
+description = "Build whisper-server, summarized output for agents"
+depends = ["whisper:fetch"]
+sources = ["external/whisper.cpp/CMakeLists.txt"]
+outputs = ["external/whisper.cpp/build/bin/whisper-server"]
+run = '''scripts/ai-logged.sh --label whisper-cpp-build --diagnostic-pattern "error:|CMake Error|FAILED" -- bash -c '
+set -euo pipefail
+src="external/whisper.cpp"
+cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON -DWHISPER_COREML=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON
+cmake --build "$src/build" --target whisper-server --config Release -j
+'
+'''
+
+[tasks.generate]
+description = "Regenerate WhisperNative.xcodeproj from project.yml"
+run = '''
+XCODE_IS_OPEN=false
+if pgrep -fq "Xcode.*\.app/Contents/MacOS/Xcode$"; then
+  XCODE_IS_OPEN=true
+  pkill -f "Xcode.*\.app/Contents/MacOS/Xcode$" || true
+fi
+rm -rf WhisperNative.xcodeproj
+xcodegen generate
+if [ "$XCODE_IS_OPEN" = true ]; then open WhisperNative.xcodeproj; fi
+'''
+
+[tasks.build]
+description = "Build WhisperNative (Debug)"
+depends = ["whisper:build"]
+run = 'xcodebuild -scheme WhisperNative -configuration Debug build'
+
+[tasks."ai:build"]
+quiet = true
+description = "Build WhisperNative (Debug), summarized output for agents"
+depends = ["ai:whisper:build"]
+run = 'scripts/ai-logged.sh --label whisper-native-build --diagnostic-pattern "error:|BUILD FAILED" --fail-pattern "\*\* BUILD FAILED \*\*" -- xcodebuild -scheme WhisperNative -configuration Debug build'
+
+[tasks.test]
+description = "Run WhisperNativeCore unit tests"
+run = 'xcodebuild -scheme WhisperNativeCoreTests -configuration Debug test'
+
+[tasks."ai:test"]
+quiet = true
+description = "Run WhisperNativeCore unit tests, summarized output for agents"
+run = 'scripts/ai-logged.sh --label whisper-native-test --diagnostic-pattern "error:|fatal error|\*\* TEST FAILED \*\*" --fail-pattern "\*\* TEST FAILED \*\*" -- xcodebuild -scheme WhisperNativeCoreTests -configuration Debug test'
+
+[tasks.run]
+description = "Build then launch WhisperNative"
+depends = ["build", "stop"]
+run = '''
+sleep 0.5
+open ~/Library/Developer/Xcode/DerivedData/WhisperNative-*/Build/Products/Debug/WhisperNative.app
+'''
+
+[tasks."ai:run"]
+quiet = true
+description = "Build (summarized) then launch WhisperNative, for agents"
+depends = ["ai:build", "stop"]
+run = '''
+sleep 0.5
+open ~/Library/Developer/Xcode/DerivedData/WhisperNative-*/Build/Products/Debug/WhisperNative.app
+'''
+
+[tasks.stop]
+quiet = true
+description = "Kill running WhisperNative process"
+run = 'pkill -f WhisperNative.app || true'
+
+[tasks.clean]
+description = "Remove generated project and build artifacts"
+run = '''
+rm -rf WhisperNative.xcodeproj
+xcodebuild -scheme WhisperNative -configuration Debug clean 2>/dev/null || true
+'''
+
+[tasks.open]
+quiet = true
+description = "Open project in Xcode"
+run = 'open WhisperNative.xcodeproj'

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App sandbox OFF: the app uses global hotkeys, Accessibility (AX) APIs to
+	     insert transcribed text into the focused field, and CGEvent posting,
+	     none of which work inside the sandbox. Distributed as a Developer ID
+	     (notarized) build, not Mac App Store. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+
+	<!-- Hardened runtime is enabled (ENABLE_HARDENED_RUNTIME in project.yml);
+	     these exceptions are required for the runtime to allow the app's work. -->
+
+	<!-- Microphone capture for live transcription. Pairs with the
+	     NSMicrophoneUsageDescription string in Info.plist. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<!-- Allow loading the whisper / inference dylibs and any unsigned
+	     just-in-time compiled code paths used by the backend. -->
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
