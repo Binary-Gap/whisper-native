@@ -43,13 +43,16 @@ git clone --depth 1 --branch "$WHISPER_CPP_TAG" https://github.com/ggerganov/whi
 [tasks."whisper:build"]
 description = "Build whisper-server (Metal, Release) from external/whisper.cpp"
 depends = ["whisper:fetch"]
-sources = ["external/whisper.cpp/CMakeLists.txt"]
+sources = ["external/whisper.cpp/CMakeLists.txt", "mise.toml"]
 outputs = ["external/whisper.cpp/build/bin/whisper-server"]
 run = '''
 set -euo pipefail
 src="external/whisper.cpp"
+# Strip the checkout path from __FILE__ strings baked into the shipped binaries.
+prefix_map="-ffile-prefix-map=$PWD/="
 cmake -S "$src" -B "$src/build" \
   -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_FLAGS="$prefix_map" -DCMAKE_CXX_FLAGS="$prefix_map" -DCMAKE_OBJC_FLAGS="$prefix_map" \
   -DGGML_METAL=ON \
   -DWHISPER_COREML=OFF \
   -DWHISPER_BUILD_TESTS=OFF \
@@ -62,12 +65,13 @@ echo "Built: $src/build/bin/whisper-server"
 quiet = true
 description = "Build whisper-server, summarized output for agents"
 depends = ["whisper:fetch"]
-sources = ["external/whisper.cpp/CMakeLists.txt"]
+sources = ["external/whisper.cpp/CMakeLists.txt", "mise.toml"]
 outputs = ["external/whisper.cpp/build/bin/whisper-server"]
 run = '''scripts/ai-logged.sh --label whisper-cpp-build --diagnostic-pattern "error:|CMake Error|FAILED" -- bash -c '
 set -euo pipefail
 src="external/whisper.cpp"
-cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON -DWHISPER_COREML=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON
+prefix_map="-ffile-prefix-map=$PWD/="
+cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$prefix_map" -DCMAKE_CXX_FLAGS="$prefix_map" -DCMAKE_OBJC_FLAGS="$prefix_map" -DGGML_METAL=ON -DWHISPER_COREML=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON
 cmake --build "$src/build" --target whisper-server --config Release -j
 '
 '''

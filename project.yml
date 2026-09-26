@@ -44,7 +44,7 @@ targets:
       path: Sources/WhisperNative/App/Info.plist
       properties:
         CFBundleIdentifier: io.binarygap.whisper-native
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "0.1.1"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         LSUIElement: true
@@ -138,7 +138,7 @@ targets:
       path: Sources/WhisperNativeCore/Shared/Info.plist
       properties:
         CFBundleIdentifier: io.binarygap.whisper-native.core
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "0.1.1"
         CFBundleVersion: "1"
     sources:
       - path: Sources/WhisperNativeCore

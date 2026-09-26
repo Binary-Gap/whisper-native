@@ -45,9 +45,11 @@ public actor WhisperServerManager: WhisperServerManaging {
            FileManager.default.isExecutableFile(atPath: bundled) {
             return bundled
         }
+        #if DEBUG
         // Dev fallback: binary produced by `mise run whisper:build`. Resolves to the
         // checkout this file was compiled from, by walking up from #filePath to the
         // repo root (Sources/WhisperNativeCore/Server/ -> repo root is 4 levels up).
+        // Debug only, so Release binaries don't embed the checkout path.
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -57,6 +59,11 @@ public actor WhisperServerManager: WhisperServerManaging {
             .appendingPathComponent("external/whisper.cpp/build/bin/whisper-server")
             .path
         return devPath
+        #else
+        return Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Resources/whisper-server")
+            .path
+        #endif
     }
 
     // MARK: - WhisperServerManaging
