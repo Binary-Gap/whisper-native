@@ -57,4 +57,5 @@ Source dirs group by target under `Sources/<target>/<module>/`. App target (`Whi
 ## Conventions
 - Code/comments English only. Default dictation language auto-detect; any whisper.cpp language selectable.
 - To tear down the daemon for testing: `launchctl bootout gui/$(id -u)/io.binarygap.whisper-server; launchctl disable ...; pkill -9 -f whisper-server` (KeepAlive respawns it otherwise). Label is `io.binarygap.whisper-server`, plist at `~/Library/LaunchAgents/io.binarygap.whisper-server.plist`; the app rewrites it to its own bundled binary on every launch.
-- Public repo: pushes are leak-checked by a PreToolUse hook (`.claude/settings.local.json`); run `mise run leak-check --all` before changing visibility or rewriting history.
+- Public repo (only `main` + release tags are on the remote). The local `private-history` branch holds pre-release history with private data: never push it. It also makes `leak-check --all` fail here, so run full scans from a fresh clone.
+- Pushes are leak-checked by a PreToolUse hook (`.claude/settings.local.json`); run `mise run leak-check --all` before changing visibility or rewriting history.
