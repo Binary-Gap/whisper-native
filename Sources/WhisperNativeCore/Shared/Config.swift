@@ -88,10 +88,15 @@ public enum CancelKey: String, Codable, Sendable, CaseIterable, Identifiable {
 
 /// Speech-to-text engine used for dictation. Whisper runs in the whisper-server
 /// launchd daemon; Parakeet (TDT v3 via FluidAudio) runs in-process on the
-/// Neural Engine, and the whisper daemon is booted out while it's selected.
+/// Neural Engine; Gemini (experimental) sends the finished recording to Google's
+/// Gemini API; Gemini Live (experimental) streams audio to Gemini's Live API
+/// while recording. The whisper daemon is booted out while a non-whisper engine
+/// is selected.
 public enum TranscriptionEngine: String, Codable, Sendable, CaseIterable, Identifiable {
     case whisper
     case parakeet
+    case gemini
+    case geminiLive
 
     public var id: String { rawValue }
 
@@ -99,6 +104,25 @@ public enum TranscriptionEngine: String, Codable, Sendable, CaseIterable, Identi
         switch self {
         case .whisper: "Whisper (whisper.cpp)"
         case .parakeet: "Parakeet TDT v3 (Neural Engine)"
+        case .gemini: "Gemini 3.5 Transcribe (cloud)"
+        case .geminiLive: "Gemini 3.5 Transcribe Live (cloud, streaming)"
+        }
+    }
+}
+
+/// Gemini Live transcription style (`inputAudioTranscription.mode`). Verbatim
+/// keeps every word as spoken; Smart drops disfluencies, resolves spoken
+/// self-corrections and formats lists, numbers and punctuation.
+public enum GeminiLiveMode: String, Codable, Sendable, CaseIterable, Identifiable {
+    case verbatim = "VERBATIM"
+    case smart = "SMART"
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .verbatim: "Verbatim"
+        case .smart: "Smart"
         }
     }
 }
@@ -122,9 +146,14 @@ public struct Config: Codable, Sendable {
     public var noiseReduction: Int
     public var soundFeedback: Bool
     public var soundVolume: Float
+    /// Pause Apple Music while recording and resume it afterwards (only when
+    /// it was playing at recording start).
+    public var pauseMusicWhileRecording: Bool
     public var recordingIndicatorEnabled: Bool
     public var prependAudioTags: Bool
     public var autoSubmitInTerminal: Bool
+    /// Press Return after an auto-paste into any app other than iTerm2.
+    public var autoSubmitInOtherApps: Bool
     public var translateToEnglish: Bool
     /// Wrap the transcript to `lineWrapWidth` characters, breaking on word
     /// boundaries (whisper-server max_len + split_on_word). Off = raw text.
@@ -153,6 +182,11 @@ public struct Config: Codable, Sendable {
     /// except while the Settings window is open, which forces a Dock icon so the
     /// window is Cmd-Tabbable.
     public var showDockIcon: Bool
+    /// Onboarding version the user has completed (0 = never). Compared against
+    /// `Onboarding.currentVersion` to decide whether to show it again.
+    public var onboardingCompletedVersion: Int
+    /// Transcription style for the Gemini Live engine.
+    public var geminiLiveMode: GeminiLiveMode
 
     public init(
         transcriptionEngine: TranscriptionEngine = .whisper,
@@ -167,9 +201,11 @@ public struct Config: Codable, Sendable {
         noiseReduction: Int = 0,
         soundFeedback: Bool = true,
         soundVolume: Float = 0.5,
+        pauseMusicWhileRecording: Bool = false,
         recordingIndicatorEnabled: Bool = true,
         prependAudioTags: Bool = false,
         autoSubmitInTerminal: Bool = false,
+        autoSubmitInOtherApps: Bool = false,
         translateToEnglish: Bool = false,
         lineWrapEnabled: Bool = false,
         lineWrapWidth: Int = 60,
@@ -181,7 +217,9 @@ public struct Config: Codable, Sendable {
         voiceCalibrationSampleText: String = "",
         toggleModifierKey: ToggleModifierKey = .fn,
         cancelKey: CancelKey = .escape,
-        showDockIcon: Bool = false
+        showDockIcon: Bool = false,
+        onboardingCompletedVersion: Int = 0,
+        geminiLiveMode: GeminiLiveMode = .smart
     ) {
         self.transcriptionEngine = transcriptionEngine
         self.selectedLanguage = selectedLanguage
@@ -195,9 +233,11 @@ public struct Config: Codable, Sendable {
         self.noiseReduction = noiseReduction
         self.soundFeedback = soundFeedback
         self.soundVolume = soundVolume
+        self.pauseMusicWhileRecording = pauseMusicWhileRecording
         self.recordingIndicatorEnabled = recordingIndicatorEnabled
         self.prependAudioTags = prependAudioTags
         self.autoSubmitInTerminal = autoSubmitInTerminal
+        self.autoSubmitInOtherApps = autoSubmitInOtherApps
         self.translateToEnglish = translateToEnglish
         self.lineWrapEnabled = lineWrapEnabled
         self.sentencePerLine = sentencePerLine
@@ -210,6 +250,8 @@ public struct Config: Codable, Sendable {
         self.toggleModifierKey = toggleModifierKey
         self.cancelKey = cancelKey
         self.showDockIcon = showDockIcon
+        self.onboardingCompletedVersion = onboardingCompletedVersion
+        self.geminiLiveMode = geminiLiveMode
     }
 
     // Custom decoder: tolerate configs persisted before a field existed by
@@ -233,9 +275,11 @@ public struct Config: Codable, Sendable {
         noiseReduction = try container.decodeIfPresent(Int.self, forKey: .noiseReduction) ?? d.noiseReduction
         soundFeedback = try container.decodeIfPresent(Bool.self, forKey: .soundFeedback) ?? d.soundFeedback
         soundVolume = try container.decodeIfPresent(Float.self, forKey: .soundVolume) ?? d.soundVolume
+        pauseMusicWhileRecording = try container.decodeIfPresent(Bool.self, forKey: .pauseMusicWhileRecording) ?? d.pauseMusicWhileRecording
         recordingIndicatorEnabled = try container.decodeIfPresent(Bool.self, forKey: .recordingIndicatorEnabled) ?? d.recordingIndicatorEnabled
         prependAudioTags = try container.decodeIfPresent(Bool.self, forKey: .prependAudioTags) ?? d.prependAudioTags
         autoSubmitInTerminal = try container.decodeIfPresent(Bool.self, forKey: .autoSubmitInTerminal) ?? d.autoSubmitInTerminal
+        autoSubmitInOtherApps = try container.decodeIfPresent(Bool.self, forKey: .autoSubmitInOtherApps) ?? d.autoSubmitInOtherApps
         translateToEnglish = try container.decodeIfPresent(Bool.self, forKey: .translateToEnglish) ?? d.translateToEnglish
         lineWrapEnabled = try container.decodeIfPresent(Bool.self, forKey: .lineWrapEnabled) ?? d.lineWrapEnabled
         lineWrapWidth = try container.decodeIfPresent(Int.self, forKey: .lineWrapWidth) ?? d.lineWrapWidth
@@ -255,6 +299,8 @@ public struct Config: Codable, Sendable {
         }
         cancelKey = try container.decodeIfPresent(CancelKey.self, forKey: .cancelKey) ?? d.cancelKey
         showDockIcon = try container.decodeIfPresent(Bool.self, forKey: .showDockIcon) ?? d.showDockIcon
+        onboardingCompletedVersion = try container.decodeIfPresent(Int.self, forKey: .onboardingCompletedVersion) ?? d.onboardingCompletedVersion
+        geminiLiveMode = (try? container.decodeIfPresent(GeminiLiveMode.self, forKey: .geminiLiveMode)) ?? d.geminiLiveMode
     }
 
     // Explicit CodingKeys so the decoder can reference the legacy
@@ -274,9 +320,11 @@ public struct Config: Codable, Sendable {
         case noiseReduction
         case soundFeedback
         case soundVolume
+        case pauseMusicWhileRecording
         case recordingIndicatorEnabled
         case prependAudioTags
         case autoSubmitInTerminal
+        case autoSubmitInOtherApps
         case translateToEnglish
         case lineWrapEnabled
         case lineWrapWidth
@@ -289,6 +337,8 @@ public struct Config: Codable, Sendable {
         case toggleModifierKey
         case cancelKey
         case showDockIcon
+        case onboardingCompletedVersion
+        case geminiLiveMode
         case fnKeyTogglesDictation
     }
 
@@ -306,9 +356,11 @@ public struct Config: Codable, Sendable {
         try container.encode(noiseReduction, forKey: .noiseReduction)
         try container.encode(soundFeedback, forKey: .soundFeedback)
         try container.encode(soundVolume, forKey: .soundVolume)
+        try container.encode(pauseMusicWhileRecording, forKey: .pauseMusicWhileRecording)
         try container.encode(recordingIndicatorEnabled, forKey: .recordingIndicatorEnabled)
         try container.encode(prependAudioTags, forKey: .prependAudioTags)
         try container.encode(autoSubmitInTerminal, forKey: .autoSubmitInTerminal)
+        try container.encode(autoSubmitInOtherApps, forKey: .autoSubmitInOtherApps)
         try container.encode(translateToEnglish, forKey: .translateToEnglish)
         try container.encode(lineWrapEnabled, forKey: .lineWrapEnabled)
         try container.encode(lineWrapWidth, forKey: .lineWrapWidth)
@@ -321,6 +373,8 @@ public struct Config: Codable, Sendable {
         try container.encode(toggleModifierKey, forKey: .toggleModifierKey)
         try container.encode(cancelKey, forKey: .cancelKey)
         try container.encode(showDockIcon, forKey: .showDockIcon)
+        try container.encode(onboardingCompletedVersion, forKey: .onboardingCompletedVersion)
+        try container.encode(geminiLiveMode, forKey: .geminiLiveMode)
     }
 
     public static var defaults: Config { Config() }
@@ -333,9 +387,15 @@ public struct Config: Codable, Sendable {
 
     /// Display name of the selected model, derived from its filename (strips the
     /// `ggml-`/`whisper_` prefixes and `.bin` extension). Used for history labels
-    /// and the whisper-server `model=` param. Parakeet has a single fixed model.
+    /// and the whisper-server `model=` param. Parakeet and both Gemini engines
+    /// each have a single fixed model.
     public var selectedModelName: String {
-        if transcriptionEngine == .parakeet { return "parakeet-tdt-0.6b-v3" }
+        switch transcriptionEngine {
+        case .parakeet: return "parakeet-tdt-0.6b-v3"
+        case .gemini: return GeminiBackend.modelID
+        case .geminiLive: return GeminiLiveSession.modelID
+        case .whisper: break
+        }
         var name = modelPath.deletingPathExtension().lastPathComponent
         for prefix in ["whisper_ggml-", "ggml-", "whisper_"] where name.hasPrefix(prefix) {
             name = String(name.dropFirst(prefix.count))
@@ -348,5 +408,12 @@ public struct Config: Codable, Sendable {
     /// settings toggle and the per-recording prepend decision.
     public var voiceCalibrationSampleExists: Bool {
         FileManager.default.fileExists(atPath: Constants.voiceCalibrationSamplePath.path)
+    }
+
+    /// Whether the first-run onboarding flow should be shown. True for
+    /// existing installs (no stored key decodes to `0`) until they complete or
+    /// skip the current version.
+    public var needsOnboarding: Bool {
+        onboardingCompletedVersion < Onboarding.currentVersion
     }
 }

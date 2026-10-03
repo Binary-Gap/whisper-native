@@ -1,6 +1,6 @@
 # whisper-native
 
-Menu-bar dictation for macOS. Hold or toggle a hotkey, speak, and the
+Menu-bar dictation for macOS. Tap a hotkey, speak, and the
 transcribed text lands at the cursor. Runs as a background agent (no Dock
 icon). Two local transcription engines: whisper.cpp (`large-v3-turbo`,
 running as a warm `launchd` daemon so there's no cold-start delay) and
@@ -12,7 +12,8 @@ downloaded.
 
 ## Features
 
-- Push-to-talk and toggle hotkeys, both customizable
+- First-run setup guide (engine, model download, permissions, hotkeys, language), skippable and reopenable from the menu bar
+- Toggle hotkey: tap a lone modifier (Fn by default) or any shortcut
 - Language cycling (Option+Tab) through the languages you pick, any of whisper.cpp's ~100 plus auto-detect
 - Live transcript pill while recording (Parakeet engine)
 - Filler-word removal (uh, hmm, um)

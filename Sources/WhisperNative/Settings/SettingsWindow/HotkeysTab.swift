@@ -23,20 +23,6 @@ struct HotkeysTab: View {
         return "Cycling goes " + names.joined(separator: " → ")
     }
 
-    // Clears the recorded chord when switching away from "Custom shortcut…" so a
-    // stale binding doesn't keep firing the toggle alongside a lone-modifier tap.
-    private var toggleKeyBinding: Binding<ToggleModifierKey> {
-        Binding(
-            get: { store.config.toggleModifierKey },
-            set: { newKey in
-                if newKey != .custom {
-                    KeyboardShortcuts.reset(.toggleDictation)
-                }
-                store.config.toggleModifierKey = newKey
-            }
-        )
-    }
-
     // Applies the chosen cancel binding. `.escape` sets the shortcut to a bare
     // Escape (which the recorder UI can't display, hence the picker); `.custom`
     // clears it so the user records their own chord.
@@ -77,19 +63,6 @@ struct HotkeysTab: View {
             }
         } else {
             openAccessibilitySettings()
-        }
-    }
-
-    private var toggleFooter: String {
-        switch store.config.toggleModifierKey {
-        case .custom:
-            "Click the shortcut, then press the keys you want. Press Delete to clear it."
-        case .none:
-            "Dictation toggle is off. Pick a lone modifier key to tap, or a custom chord shortcut."
-        case .fn:
-            "Tap Fn to toggle dictation. Requires Accessibility permission. Set the Globe key action to “Do Nothing” in System Settings › Keyboard so macOS doesn't intercept it."
-        default:
-            "Tap this modifier key to toggle dictation. Requires Accessibility permission. Left-side modifiers may fire while typing chords; right-side keys are safer."
         }
     }
 
@@ -137,22 +110,11 @@ struct HotkeysTab: View {
             }
 
             Section {
-                Picker("Toggle dictation", selection: toggleKeyBinding) {
-                    ForEach(ToggleModifierKey.allCases) { key in
-                        Text(key.displayName).tag(key)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                if store.config.toggleModifierKey == .custom {
-                    LabeledContent("Shortcut") {
-                        ShortcutRecorderField(name: .toggleDictation)
-                    }
-                }
+                ToggleDictationControls(store: store, showsFooter: false)
             } header: {
                 Text("Toggle dictation")
             } footer: {
-                Text(toggleFooter)
+                Text(ToggleDictationControls.footer(for: store.config.toggleModifierKey))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -204,49 +166,4 @@ struct HotkeysTab: View {
         }
         .formStyle(.grouped)
     }
-}
-
-// MARK: - Shortcut recorder field
-
-/// Wraps `KeyboardShortcuts.Recorder` and, while it's actively recording, shows
-/// a "Press shortcut…" hint plus an ✕ button to cancel the recording (in
-/// addition to the built-in Escape / click-away). Cancelling just resigns first
-/// responder on the window, which ends the recorder's capture without changing
-/// any already-saved shortcut.
-private struct ShortcutRecorderField: View {
-    let name: KeyboardShortcuts.Name
-    @State private var isRecording = false
-
-    var body: some View {
-        HStack(spacing: DesignSystem.Spacing.sm) {
-            KeyboardShortcuts.Recorder("", name: name)
-
-            if isRecording {
-                Text("Press shortcut…")
-                    .font(DesignSystem.Typography.rowSubtitle)
-                    .foregroundStyle(.secondary)
-                    .transition(.opacity)
-
-                Button {
-                    // Resign first responder to end the recorder's capture.
-                    NSApp.keyWindow?.makeFirstResponder(nil)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .help("Cancel recording")
-                .transition(.opacity)
-            }
-        }
-        .animation(DesignSystem.Motion.snappy, value: isRecording)
-        .onReceive(NotificationCenter.default.publisher(for: .recorderActiveStatusDidChange)) { note in
-            isRecording = (note.userInfo?["isActive"] as? Bool) ?? false
-        }
-    }
-}
-
-extension Notification.Name {
-    /// Posted by `KeyboardShortcuts.RecorderCocoa` when it starts/stops capturing.
-    static let recorderActiveStatusDidChange = Self("KeyboardShortcuts_recorderActiveStatusDidChange")
 }

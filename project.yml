@@ -14,10 +14,6 @@ settings:
     CODE_SIGN_STYLE: Manual
     ENABLE_HARDENED_RUNTIME: true
     DEAD_CODE_STRIPPING: true
-    # The Bundle-whisper-server post-build script copies the whisper-server binary
-    # from external/whisper.cpp/build (outside DerivedData); script sandboxing would
-    # deny that read.
-    ENABLE_USER_SCRIPT_SANDBOXING: false
     SWIFT_VERSION: "6.0"
   configs:
     debug:
@@ -35,6 +31,8 @@ packages:
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio
     exactVersion: 0.17.4
+  MusicPause:
+    path: Packages/MusicPause
 
 targets:
   WhisperNative:
@@ -43,12 +41,15 @@ targets:
     info:
       path: Sources/WhisperNative/App/Info.plist
       properties:
-        CFBundleIdentifier: io.binarygap.whisper-native
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleName: $(APP_DISPLAY_NAME)
+        CFBundleDisplayName: $(APP_DISPLAY_NAME)
         CFBundleShortVersionString: "0.1.1"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         LSUIElement: true
         NSMicrophoneUsageDescription: "WhisperNative needs microphone access to record audio for transcription."
+        NSAppleEventsUsageDescription: "WhisperNative pauses Apple Music while you dictate and resumes it afterwards."
         NSPrincipalClass: NSApplication
     sources:
       - path: Sources/WhisperNative
@@ -56,80 +57,38 @@ targets:
       - path: Resources/iterm
         type: folder
         buildPhase: resources
+      # whisper-server + its whisper.cpp/ggml dylibs, staged by
+      # `mise run whisper:build` (scripts/stage-whisper-server.sh) with
+      # bundle-relative rpaths. Xcode copies and signs them, then seals the app
+      # over the result, so the signature stays valid across incremental builds.
+      - path: external/whisper.cpp/build/bundle/whisper-server
+        buildPhase:
+          copyFiles:
+            destination: executables
+        attributes: [CodeSignOnCopy]
+      - path: external/whisper.cpp/build/bundle/Frameworks
+        buildPhase:
+          copyFiles:
+            destination: frameworks
+        attributes: [CodeSignOnCopy]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.binarygap.whisper-native
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Resources/WhisperNative.entitlements
+        APP_DISPLAY_NAME: WhisperNative
+      configs:
+        # Debug is a separate dev app so it runs next to the installed Release
+        # copy: own TCC grants, UserDefaults (settings + hotkeys) and menu bar
+        # item. Constants.isDevBuild splits the daemon, port, data and logs.
+        debug:
+          PRODUCT_BUNDLE_IDENTIFIER: io.binarygap.whisper-native.dev
+          APP_DISPLAY_NAME: WhisperNative Dev
     scheme: {}
     dependencies:
       - target: WhisperNativeCore
       - package: KeyboardShortcuts
-    postBuildScripts:
-      # Bundle the whisper-server binary + its whisper.cpp/ggml dylibs (built by
-      # `mise run whisper:build`) so the app is self-contained and notarizable.
-      # whisper-server links libwhisper + libggml* via @rpath; we drop those dylibs
-      # into Contents/Frameworks, point an @executable_path rpath at them, and
-      # re-sign everything with the app's identity.
-      - name: Bundle whisper-server
-        basedOnDependencyAnalysis: false
-        script: |
-          set -euo pipefail
-          BUILD_BIN="$SRCROOT/external/whisper.cpp/build/bin"
-          SRC="$BUILD_BIN/whisper-server"
-          RES_DIR="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
-          FW_DIR="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
-          DEST="$RES_DIR/whisper-server"
-          if [ ! -f "$SRC" ]; then
-            echo "error: whisper-server not found at $SRC. Run 'mise run whisper:build' first." >&2
-            exit 1
-          fi
-          mkdir -p "$RES_DIR" "$FW_DIR"
-          cp -f "$SRC" "$DEST"
-          chmod +x "$DEST"
-
-          # Copy the dylibs whisper-server depends on (versioned real files; the
-          # unversioned/major symlinks in the build tree resolve to these). Each
-          # @rpath/libNAME.MAJOR.dylib install name maps to libNAME.FULL.dylib.
-          LIBS="libwhisper.1.9.1 libggml.0.15.1 libggml-base.0.15.1 libggml-cpu.0.15.1 libggml-blas.0.15.1 libggml-metal.0.15.1"
-          for full in $LIBS; do
-            cp -f "$BUILD_BIN/$full.dylib" "$FW_DIR/"
-          done
-          # Recreate the major-version names the install names reference.
-          ( cd "$FW_DIR"
-            ln -sf libwhisper.1.9.1.dylib     libwhisper.1.dylib
-            ln -sf libggml.0.15.1.dylib       libggml.0.dylib
-            ln -sf libggml-base.0.15.1.dylib  libggml-base.0.dylib
-            ln -sf libggml-cpu.0.15.1.dylib   libggml-cpu.0.dylib
-            ln -sf libggml-blas.0.15.1.dylib  libggml-blas.0.dylib
-            ln -sf libggml-metal.0.15.1.dylib libggml-metal.0.dylib
-          )
-
-          # whisper-server lives in Resources; the dylibs in Frameworks. Add an
-          # rpath so @rpath/lib*.dylib resolves at runtime. Strip the dev-tree
-          # rpath baked in by cmake first (it points at the build dir).
-          install_name_tool -delete_rpath "$BUILD_BIN" "$DEST" 2>/dev/null || true
-          install_name_tool -add_rpath "@executable_path/../Frameworks" "$DEST"
-          # The dylibs reference each other via @rpath too; they sit side by side,
-          # so @loader_path resolves their inter-dependencies.
-          for f in "$FW_DIR"/libwhisper.1.9.1.dylib "$FW_DIR"/libggml*.0.15.1.dylib; do
-            install_name_tool -add_rpath "@loader_path" "$f" 2>/dev/null || true
-          done
-
-          # Sign dylibs first, then the binary (hardened runtime for release/
-          # notarization; ad-hoc when unsigned).
-          IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-}"
-          sign() {
-            if [ -n "$IDENTITY" ]; then
-              codesign --force --options runtime --timestamp -s "$IDENTITY" "$1"
-            else
-              codesign --force -s - "$1"
-            fi
-          }
-          for f in "$FW_DIR"/libwhisper.1.9.1.dylib "$FW_DIR"/libggml*.0.15.1.dylib; do
-            sign "$f"
-          done
-          sign "$DEST"
+      - package: MusicPause
 
   WhisperNativeCore:
     type: framework

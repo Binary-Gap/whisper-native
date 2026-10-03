@@ -31,14 +31,18 @@ public final class SettingsStore: ObservableObject {
         guard let data = try? encoder.encode(config) else { return }
         defaults.set(data, forKey: Self.configKey)
 
-        // Sync launch-at-login state
+        // Sync launch-at-login state, touching SMAppService only when it differs
+        // (unregistering a never-registered app throws "Operation not permitted")
         let launchAtLogin = config.launchAtLogin
         Task.detached {
+            let service = SMAppService.mainApp
             do {
                 if launchAtLogin {
-                    try SMAppService.mainApp.register()
-                } else {
-                    try await SMAppService.mainApp.unregister()
+                    if service.status != .enabled {
+                        try service.register()
+                    }
+                } else if service.status == .enabled || service.status == .requiresApproval {
+                    try await service.unregister()
                 }
             } catch {
                 AppLogger.shared.log(.warning, "SMAppService toggle failed: \(error)")

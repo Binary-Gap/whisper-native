@@ -5,6 +5,7 @@ import WhisperNativeCore
 public final class StatusMenuBuilder {
     private let onShowSettings: @MainActor () -> Void
     private let onShowHistory: @MainActor () -> Void
+    private let onShowOnboarding: @MainActor () -> Void
     private let onToggleServer: @MainActor () -> Void
     private let onSelectInputDevice: @MainActor (String?) -> Void
     private let onQuit: @MainActor () -> Void
@@ -26,12 +27,14 @@ public final class StatusMenuBuilder {
     public init(
         onShowSettings: @escaping @MainActor () -> Void,
         onShowHistory: @escaping @MainActor () -> Void,
+        onShowOnboarding: @escaping @MainActor () -> Void,
         onToggleServer: @escaping @MainActor () -> Void,
         onSelectInputDevice: @escaping @MainActor (String?) -> Void,
         onQuit: @escaping @MainActor () -> Void
     ) {
         self.onShowSettings = onShowSettings
         self.onShowHistory = onShowHistory
+        self.onShowOnboarding = onShowOnboarding
         self.onToggleServer = onToggleServer
         self.onSelectInputDevice = onSelectInputDevice
         self.onQuit = onQuit
@@ -49,6 +52,7 @@ public final class StatusMenuBuilder {
         let target = ActionTarget(
             onSettings: onShowSettings,
             onHistory: onShowHistory,
+            onOnboarding: onShowOnboarding,
             onToggleServer: onToggleServer,
             onQuit: onQuit
         )
@@ -86,6 +90,15 @@ public final class StatusMenuBuilder {
         settings.target = target
         menu.addItem(settings)
         settingsItem = settings
+
+        // Setup Guide: reopens the onboarding window at its first step.
+        let setupGuide = NSMenuItem(
+            title: "Setup Guide…",
+            action: #selector(ActionTarget.onboardingAction),
+            keyEquivalent: ""
+        )
+        setupGuide.target = target
+        menu.addItem(setupGuide)
 
         menu.addItem(.separator())
 
@@ -174,9 +187,9 @@ public final class StatusMenuBuilder {
             ? "Server: Downloading model…"
             : (serverRunning ? "Server: Running" : "Server: Stopped")
         serverToggleItem?.title = serverRunning ? "Stop Server" : "Start Server"
-        // Parakeet runs in-process and keeps the whisper daemon booted out; toggling
-        // it on would just kick off a (possibly 1.6 GB) model download for a daemon
-        // that never gets used while Parakeet stays selected.
+        // Parakeet and Gemini keep the whisper daemon booted out; toggling it on
+        // would just kick off a (possibly 1.6 GB) model download for a daemon
+        // that never gets used while either stays selected.
         serverToggleItem?.isEnabled = !downloadingModel && whisperEngineActive
         modelItem?.title = "Model: \(modelName)"
         rebuildMicSubmenu(inputDevices: inputDevices, selectedInputDeviceUID: selectedInputDeviceUID)
@@ -225,17 +238,20 @@ public final class StatusMenuBuilder {
 private final class ActionTarget: NSObject {
     private let onSettings: @MainActor () -> Void
     private let onHistory: @MainActor () -> Void
+    private let onOnboarding: @MainActor () -> Void
     private let onToggleServer: @MainActor () -> Void
     private let onQuit: @MainActor () -> Void
 
     init(
         onSettings: @escaping @MainActor () -> Void,
         onHistory: @escaping @MainActor () -> Void,
+        onOnboarding: @escaping @MainActor () -> Void,
         onToggleServer: @escaping @MainActor () -> Void,
         onQuit: @escaping @MainActor () -> Void
     ) {
         self.onSettings = onSettings
         self.onHistory = onHistory
+        self.onOnboarding = onOnboarding
         self.onToggleServer = onToggleServer
         self.onQuit = onQuit
     }
@@ -246,6 +262,10 @@ private final class ActionTarget: NSObject {
 
     @objc func historyAction() {
         onHistory()
+    }
+
+    @objc func onboardingAction() {
+        onOnboarding()
     }
 
     @objc func serverToggleAction() {
@@ -295,6 +315,7 @@ public final class StatusBarController {
     public init(
         onShowSettings: @escaping @MainActor () -> Void,
         onShowHistory: @escaping @MainActor () -> Void,
+        onShowOnboarding: @escaping @MainActor () -> Void,
         onToggleServer: @escaping @MainActor () -> Void,
         onSelectInputDevice: @escaping @MainActor (String?) -> Void,
         onQuit: @escaping @MainActor () -> Void
@@ -302,6 +323,7 @@ public final class StatusBarController {
         menuBuilder = StatusMenuBuilder(
             onShowSettings: onShowSettings,
             onShowHistory: onShowHistory,
+            onShowOnboarding: onShowOnboarding,
             onToggleServer: onToggleServer,
             onSelectInputDevice: onSelectInputDevice,
             onQuit: onQuit
@@ -362,9 +384,12 @@ public final class StatusBarController {
     }
 
     /// Persistent "which language am I dictating in" state, next to the icon.
+    /// The dev app appends "·dev" so it stands apart from the installed copy.
     public func updateLanguage(_ language: Language) {
-        statusItem.button?.title = " \(language.displayCode)"
-        statusItem.button?.toolTip = "Transcription language: \(language.displayName)"
+        let devTag = Constants.isDevBuild ? "·dev" : ""
+        statusItem.button?.title = " \(language.displayCode)\(devTag)"
+        let devPrefix = Constants.isDevBuild ? "WhisperNative Dev, " : ""
+        statusItem.button?.toolTip = "\(devPrefix)Transcription language: \(language.displayName)"
     }
 
     public var button: NSStatusBarButton? { statusItem.button }

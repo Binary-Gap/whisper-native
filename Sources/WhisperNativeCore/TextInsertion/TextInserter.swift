@@ -18,6 +18,9 @@ public protocol TextInserting: AnyObject {
     func insertText(_ text: String) async throws
     /// Wraps text in <audio>\n...\n</audio> then calls insertText.
     func insertTextWithAudioTags(_ text: String) async throws
+    /// Waits for a just-sent paste to land, then sends Return to the frontmost
+    /// application (submits chat inputs and similar single-line fields).
+    func pressReturn() async throws
     /// Copies text to clipboard only — no paste.
     func copyToClipboard(_ text: String)
 }
@@ -29,6 +32,7 @@ public final class TextInserter: TextInserting {
 
     private let cmdVDelay: TimeInterval = 0.15
     private let clipboardRestoreDelay: TimeInterval = 0.5
+    private let returnAfterPasteDelay: TimeInterval = 0.15
     private let eventSource = CGEventSource(stateID: .hidSystemState)
 
     public init() {}
@@ -87,6 +91,29 @@ public final class TextInserter: TextInserting {
 
     public func insertTextWithAudioTags(_ text: String) async throws {
         try await insertText(Constants.wrapWithAudioTags(text))
+    }
+
+    public func pressReturn() async throws {
+        guard Self.hasAccessibilityPermission() else {
+            AppLogger.shared.log(.error, "pressReturn: Accessibility permission denied, Return dropped.")
+            throw AppError.accessibilityDenied
+        }
+        // Apps read the pasteboard asynchronously on Cmd+V; a Return posted
+        // right behind it can submit before the pasted text is in the field.
+        try await Task.sleep(nanoseconds: UInt64(returnAfterPasteDelay * 1_000_000_000))
+        // Key code 36 = Return.
+        guard let keyDown = CGEvent(keyboardEventSource: eventSource, virtualKey: 36, keyDown: true),
+              let keyUp   = CGEvent(keyboardEventSource: eventSource, virtualKey: 36, keyDown: false)
+        else {
+            throw AppError.textInsertionFailed("CGEvent creation failed for Return")
+        }
+        // Cleared so a modifier still held (or inherited from the source state)
+        // never turns it into Shift+Return, a soft newline in most chat inputs.
+        keyDown.flags = []
+        keyUp.flags = []
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+        AppLogger.shared.log(.info, "pressReturn: sent Return")
     }
 
     public func copyToClipboard(_ text: String) {

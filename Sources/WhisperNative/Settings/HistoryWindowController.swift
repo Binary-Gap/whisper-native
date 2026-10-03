@@ -99,7 +99,7 @@ private struct HistoryView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(entries) { entry in
+                    ForEach(entries.prefix(Constants.maxHistoryDisplayedItems)) { entry in
                         HistoryRow(
                             entry: entry,
                             viewModel: viewModel,
@@ -284,6 +284,17 @@ private struct HistoryRow: View {
         return String(format: "%.1fs", seconds)
     }
 
+    private var audioDurationLabel: String? {
+        guard let seconds = entry.audioDurationSeconds else { return nil }
+        return String(format: "%.1fs audio", seconds)
+    }
+
+    // Single dictations cost fractions of a cent, so keep 4 decimals.
+    private var costLabel: String? {
+        guard let dollars = entry.estimatedCostUSD else { return nil }
+        return String(format: "$%.4f", dollars)
+    }
+
     var body: some View {
         // Transcript leads (it's a text log); metadata is a quiet footnote below.
         // Actions stay hidden until hover, revealed as a single floating glass
@@ -340,7 +351,8 @@ private struct HistoryRow: View {
         }
     }
 
-    // A single dot-separated footnote: state · time · language · model · duration.
+    // A single dot-separated footnote:
+    // state · time · language · model · mode · audio length · response time · cost.
     private var metadataLine: some View {
         HStack(spacing: DesignSystem.Spacing.xs) {
             if entry.status == .failed {
@@ -362,7 +374,10 @@ private struct HistoryRow: View {
             entry.language.rawValue.uppercased(),
             entry.modelName,
         ]
+        if let modeLabel = entry.transcriptionModeLabel { parts.append(modeLabel) }
+        if let audioDurationLabel { parts.append(audioDurationLabel) }
         if let durationLabel { parts.append(durationLabel) }
+        if let costLabel { parts.append(costLabel) }
         return parts.joined(separator: "  ·  ")
     }
 
@@ -589,11 +604,24 @@ private final class HistoryViewModel: NSObject, ObservableObject, AVAudioPlayerD
         }
 
         let config = store.config
-        let backend: any TranscriptionBackend = config.transcriptionEngine == .parakeet
-            ? ParakeetBackend.shared
-            : whisperClient
+        let backend: any TranscriptionBackend
+        let unavailableMessage: String
+        var modelName = config.selectedModelName
+        switch config.transcriptionEngine {
+        case .whisper:
+            backend = whisperClient
+            unavailableMessage = "whisper-server is not running. Start it from the menu."
+        case .parakeet:
+            backend = ParakeetBackend.shared
+            unavailableMessage = "Parakeet is not available."
+        case .gemini, .geminiLive:
+            // A rerun has only the WAV: Gemini Live reruns through the batch model.
+            backend = GeminiBackend.shared
+            modelName = GeminiBackend.modelID
+            unavailableMessage = AppError.geminiAPIKeyMissing.localizedDescription
+        }
         guard await backend.isAvailable() else {
-            errorMessages[entry.id] = "whisper-server is not running. Start it from the menu."
+            errorMessages[entry.id] = unavailableMessage
             return
         }
 
@@ -605,7 +633,12 @@ private final class HistoryViewModel: NSObject, ObservableObject, AVAudioPlayerD
             var updated = entry
             updated.text = result.text
             updated.language = result.language
-            updated.modelName = config.selectedModelName
+            updated.modelName = modelName
+            // Reruns never go through Gemini Live, so they carry no mode.
+            updated.transcriptionMode = nil
+            updated.estimatedCostUSD = GeminiPricing.estimatedDollars(
+                modelName: modelName, audioSeconds: entry.audioDurationSeconds, text: result.text
+            )
             updated.durationSeconds = result.durationSeconds
             updated.status = .success
             historyStore.update(updated)

@@ -30,6 +30,11 @@ struct TranscriptionTab: View {
                     help: "Presses Enter after sending a transcript to an iTerm2 session.",
                     isOn: $store.config.autoSubmitInTerminal
                 )
+                LabeledToggle(
+                    "Auto-submit in other apps",
+                    help: "Presses Enter after auto-pasting a transcript into any other app (chat inputs, browsers). Esc once during a recording skips it.",
+                    isOn: $store.config.autoSubmitInOtherApps
+                )
             } header: {
                 Text("Insertion")
             } footer: {

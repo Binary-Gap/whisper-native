@@ -34,14 +34,14 @@ public actor WhisperServerManager: WhisperServerManaging {
     }
 
     /// Resolves the whisper-server binary. Order: explicit env override, then the
-    /// copy bundled inside the .app (Contents/Resources), then the dev build tree
+    /// copy bundled inside the .app (Contents/MacOS), then the dev build tree
     /// under external/whisper.cpp for `xcodebuild`-from-source runs.
     private static func resolveBinaryPath() -> String {
         if let envPath = ProcessInfo.processInfo.environment["WHISPER_SERVER_BINARY"],
            !envPath.isEmpty {
             return envPath
         }
-        if let bundled = Bundle.main.url(forResource: "whisper-server", withExtension: nil)?.path,
+        if let bundled = Bundle.main.url(forAuxiliaryExecutable: "whisper-server")?.path,
            FileManager.default.isExecutableFile(atPath: bundled) {
             return bundled
         }
@@ -61,7 +61,7 @@ public actor WhisperServerManager: WhisperServerManaging {
         return devPath
         #else
         return Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Resources/whisper-server")
+            .appendingPathComponent("Contents/MacOS/whisper-server")
             .path
         #endif
     }

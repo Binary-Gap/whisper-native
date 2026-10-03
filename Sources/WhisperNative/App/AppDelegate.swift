@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let languageHUD: LanguageHUD
     private let settingsWindowController: SettingsWindowController
     private let historyWindowController: HistoryWindowController
+    // Assigned right after super.init() because its onClose captures self.
+    private var onboardingWindowController: OnboardingWindowController!
     private let orchestrator: Orchestrator
     private var statusBarController: StatusBarController?
     private var cancellables = Set<AnyCancellable>()
@@ -38,6 +40,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // only shows "Downloading model…") for the download that's blocking the
     // daemon, not for a background model switch while the server already runs.
     private var awaitingFirstRunDownload = false
+
+    // Set once the app starts quitting. AppKit closes open windows during
+    // termination, and an onboarding window closed that way is neither a
+    // Finish nor a Skip, so it leaves onboarding pending for the next launch.
+    private var isTerminating = false
+
+    // True when the engine changed while onboarding was open; onboardingClosed
+    // then runs the full engine switch instead of the plain startup.
+    private var engineSwitchDeferred = false
 
     // MARK: - Init
 
@@ -62,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             audioRecorder: audioRecorder,
             backend: whisperClient,
             parakeetBackend: ParakeetBackend.shared,
+            geminiBackend: GeminiBackend.shared,
             textInserter: textInserter,
             indicator: recordingIndicator,
             liveTranscriptPill: LiveTranscriptPill(),
@@ -79,6 +91,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         super.init()
+
+        onboardingWindowController = OnboardingWindowController(
+            store: store,
+            modelSectionState: modelSectionState,
+            onClose: { [weak self] outcome in
+                self?.onboardingClosed(outcome)
+            }
+        )
 
         // Step 4: Wire AudioRecorder failure callback to Orchestrator.
         // (Cannot be done before super.init() in Swift; audioRecorder.onRecordingFailed
@@ -119,6 +139,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onShowHistory: { [weak self] in
                 self?.historyWindowController.show()
             },
+            onShowOnboarding: { [weak self] in
+                self?.onboardingWindowController.show()
+            },
             onToggleServer: { [weak self] in
                 self?.toggleServer()
             },
@@ -130,8 +153,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
 
-        // History is the primary window: surface it on launch.
-        historyWindowController.show()
+        // History is the primary window: surface it on launch, unless onboarding
+        // is pending, in which case onboarding shows instead and History follows
+        // when it closes.
+        let showsOnboarding = store.config.needsOnboarding
+        if showsOnboarding {
+            onboardingWindowController.show()
+        } else {
+            historyWindowController.show()
+        }
 
         // Step 7: Register hotkeys.
         hotkeyManager.register(
@@ -171,7 +201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the code signature. Surface the system Accessibility prompt on launch when
         // a modifier key is configured but untrusted, so the user isn't left with a
         // silently dead hotkey. The self-heal poll then installs the tap once granted.
-        hotkeyManager.requestAccessibilityIfNeeded()
+        // While onboarding is open its Permissions step asks instead.
+        if !showsOnboarding {
+            hotkeyManager.requestAccessibilityIfNeeded()
+        }
 
         // Sync the cancel shortcut binding to the persisted CancelKey choice
         // (Escape can't be shown by the recorder, so the picker owns it).
@@ -206,13 +239,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        // Switching engines swaps which model stays resident.
+        // Switching engines swaps which model stays resident. A switch made in
+        // onboarding applies when it closes, so picking an engine there never
+        // starts a download on its own.
         store.$config
             .map(\.transcriptionEngine)
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] engine in
-                self?.applyEngine(engine)
+                guard let self else { return }
+                if onboardingWindowController.isShowing {
+                    engineSwitchDeferred = true
+                } else {
+                    applyEngine(engine)
+                }
             }
             .store(in: &cancellables)
 
@@ -255,14 +295,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        // Step 8: Ensure the selected engine is up.
-        if store.config.transcriptionEngine == .parakeet {
-            applyEngine(.parakeet)
-        } else {
-            ensureWhisperServerRunning()
+        // Step 8: Ensure the selected engine is up. With onboarding open the user
+        // picks the engine/model first; onboardingClosed starts it.
+        if !showsOnboarding {
+            startSelectedEngine()
         }
 
         AppLogger.shared.log(.info, "WhisperNative launched")
+    }
+
+    // Brings up whichever engine is selected. Safe to call when it's already
+    // up: the whisper path health-checks first (and skips a download already in
+    // flight), Parakeet's preload reuses its cached load task, and Gemini only
+    // needs the daemon kept down.
+    private func startSelectedEngine() {
+        let engine = store.config.transcriptionEngine
+        if engine == .whisper {
+            ensureWhisperServerRunning()
+        } else {
+            applyEngine(engine)
+        }
+    }
+
+    // MARK: - Onboarding
+
+    // Finish and Skip (including the close button) both mark onboarding done,
+    // then run the normal engine startup, which downloads the default whisper
+    // model if the user still has none.
+    private func onboardingClosed(_ outcome: OnboardingOutcome) {
+        guard !isTerminating else { return }
+        store.config.onboardingCompletedVersion = Onboarding.currentVersion
+        AppLogger.shared.log(.info, "Onboarding \(outcome == .finished ? "finished" : "skipped")")
+        if engineSwitchDeferred {
+            engineSwitchDeferred = false
+            applyEngine(store.config.transcriptionEngine)
+        } else {
+            startSelectedEngine()
+        }
+        historyWindowController.show()
     }
 
     // True once both the selected whisper model and its VAD model (when one is
@@ -322,6 +392,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // "Downloading model…" state. The $isDownloading observer above bootstraps
     // the server once the download lands.
     private func startFirstRunModelDownload() {
+        // Onboarding's model step owns model choice and shows its own download
+        // state; the default download waits until it closes (onboardingClosed).
+        if onboardingWindowController.isShowing {
+            AppLogger.shared.log(.info, "First-run download deferred until onboarding closes")
+            return
+        }
         guard !modelSectionState.isDownloading else { return }
         // Rescan first: the model (or VAD model) may already sit on disk — placed
         // by hand, left over from an engine switch, or found after a models
@@ -360,9 +436,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
-    // Re-open brings up the primary History window.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        isTerminating = true
+        return .terminateNow
+    }
+
+    // Re-open brings onboarding forward while it's open, otherwise the primary
+    // History window.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows {
+        if onboardingWindowController.isShowing {
+            onboardingWindowController.window?.makeKeyAndOrderFront(nil)
+        } else if !hasVisibleWindows {
             historyWindowController.show()
         }
         return true
@@ -426,8 +510,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Engine switch (config observer)
 
-    // Parakeet runs in-process, so selecting it boots the whisper daemon out to
-    // free its memory (KeepAlive would respawn it otherwise); switching back
+    // Parakeet runs in-process and both Gemini engines in the cloud, so
+    // selecting any of them boots the whisper daemon out to free its memory
+    // (KeepAlive would respawn it otherwise); the Gemini engines also unload
+    // Parakeet. Switching back to whisper
     // unloads Parakeet and re-bootstraps whisper with the current model.
     private func applyEngine(_ engine: TranscriptionEngine) {
         AppLogger.shared.log(.info, "Transcription engine: \(engine.rawValue)")
@@ -446,6 +532,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } catch {
                     AppLogger.shared.log(.error, "Parakeet preload failed: \(error)")
                 }
+                refreshStatusMenu()
+            case .gemini, .geminiLive:
+                do {
+                    try await serverManager.stopServer()
+                } catch {
+                    AppLogger.shared.log(.warning, "whisper-server bootout for Gemini: \(error)")
+                }
+                await ParakeetBackend.shared.unload()
                 refreshStatusMenu()
             case .whisper:
                 await ParakeetBackend.shared.unload()
@@ -477,7 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // reload if the model file is missing (e.g. a picker briefly points at a path
     // being downloaded) to avoid bootstrapping the server into a crash loop.
     private func reloadServerForModelChange(modelPath: URL, vadModelPath: URL?) {
-        // The daemon is down while Parakeet is selected; applyEngine picks up the
+        // The daemon is down while another engine is selected; applyEngine picks up the
         // new model when switching back.
         guard store.config.transcriptionEngine == .whisper else { return }
         // A first-run download sets modelPath/vadModelPath right before flipping
@@ -511,8 +605,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Server toggle (called from status menu)
 
     private func toggleServer() {
-        // The menu already disables this item while Parakeet is selected, but
-        // guard here too since Parakeet leaves no whisper model requirement to
+        // The menu already disables this item while another engine is selected, but
+        // guard here too since those engines leave no whisper model requirement to
         // start a (possibly 1.6 GB) download for a daemon that won't be used.
         guard store.config.transcriptionEngine == .whisper else { return }
         Task {

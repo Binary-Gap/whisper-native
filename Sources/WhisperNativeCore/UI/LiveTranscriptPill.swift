@@ -1,6 +1,7 @@
 import AppKit
 
-// Overlay showing the live transcript while recording with Parakeet, placed near
+// Overlay showing the live transcript while recording with Parakeet or Gemini
+// Live, placed near
 // the text input located at recording start (TextInputAnchor) and fixed there
 // for the whole recording. Same look as LanguageHUD (borderless, click-through,
 // .hudWindow blur), sized to the text and growing with it; the oldest words

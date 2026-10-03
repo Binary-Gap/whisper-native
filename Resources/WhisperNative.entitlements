@@ -17,6 +17,11 @@
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
 
+	<!-- Apple Events to Music for "Pause music while dictating". Pairs with the
+	     NSAppleEventsUsageDescription string in Info.plist. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+
 	<!-- Allow loading the whisper / inference dylibs and any unsigned
 	     just-in-time compiled code paths used by the backend. -->
 	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>

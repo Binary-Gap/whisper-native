@@ -19,6 +19,11 @@ public final class AudioRecorder: AudioRecording {
     // capture it without touching MainActor-isolated state, then dispatch to main itself.
     public var onLevelUpdate: (@Sendable (Float) -> Void)?
 
+    // Receives every converted 16kHz mono 16-bit PCM buffer (the same bytes the
+    // WAV gets), on CoreAudio's IO thread. Snapshotted at startRecording, so set
+    // it before starting; it must not block.
+    public var pcmSink: (@Sendable (Data) -> Void)?
+
     // UID of the preferred input device (Config.inputDeviceUID). Nil = system default.
     public var preferredInputDeviceUID: String?
 
@@ -245,6 +250,7 @@ public final class AudioRecorder: AudioRecording {
             nativeFormat: nativeFormat,
             targetFormat: targetFormat,
             wavWriter: wavWriter!,
+            pcmSink: pcmSink,
             // Snapshot the Sendable callback now (on main). The audio IO thread closure
             // must NOT capture `self` (MainActor-isolated): touching it there triggers
             // swift_task_isCurrentExecutor -> dispatch_assert_queue -> SIGTRAP, since the
@@ -403,6 +409,7 @@ final class CaptureContext: @unchecked Sendable {
     let nativeFormat: AudioStreamBasicDescription
     let targetFormat: AudioStreamBasicDescription
     let wavWriter: WavWriter
+    let pcmSink: (@Sendable (Data) -> Void)?
     let levelCallback: (Float) -> Void
 
     // Conversion output scratch buffer (reused across calls).
@@ -416,12 +423,14 @@ final class CaptureContext: @unchecked Sendable {
         nativeFormat: AudioStreamBasicDescription,
         targetFormat: AudioStreamBasicDescription,
         wavWriter: WavWriter,
+        pcmSink: (@Sendable (Data) -> Void)?,
         levelCallback: @escaping (Float) -> Void
     ) {
         self.converter = converter
         self.nativeFormat = nativeFormat
         self.targetFormat = targetFormat
         self.wavWriter = wavWriter
+        self.pcmSink = pcmSink
         self.levelCallback = levelCallback
     }
 
@@ -521,5 +530,6 @@ final class CaptureContext: @unchecked Sendable {
 
         let outputData = conversionBuffer.prefix(writtenSamples).withUnsafeBytes { Data($0) }
         wavWriter.appendData(outputData)
+        pcmSink?(outputData)
     }
 }

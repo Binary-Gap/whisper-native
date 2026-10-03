@@ -1,6 +1,17 @@
 import FluidAudio
 import Foundation
 
+/// Load/download status of Parakeet's in-process models, surfaced to the
+/// onboarding engine/model step so it can show progress without a separate
+/// downloader (unlike whisper's model files, Parakeet's download is opaque to
+/// callers; there is no byte-level progress).
+public enum ParakeetLoadState: Sendable, Equatable {
+    case notLoaded
+    case loading
+    case ready
+    case failed(String)
+}
+
 /// Parakeet TDT v3 via FluidAudio, run in-process on the Neural Engine. Models
 /// (ASR + Silero VAD) download from HuggingFace on first load into FluidAudio's
 /// cache (`~/Library/Application Support/FluidAudio/Models`). One shared instance
@@ -11,11 +22,24 @@ public actor ParakeetBackend: TranscriptionBackend {
     public static let modelVersion = AsrModelVersion.v3
 
     private var loadTask: Task<(AsrManager, VadManager), Error>?
+    private var currentLoadState: ParakeetLoadState = .notLoaded
+
+    /// Whether the ASR model is already in FluidAudio's cache, so loading it
+    /// skips the ~500 MB download.
+    public nonisolated static var modelsDownloaded: Bool {
+        AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory(for: modelVersion), version: modelVersion)
+    }
 
     /// Loads (downloading if needed) both models, so the first dictation after
     /// selecting Parakeet doesn't pay for it.
     public func preload() async throws {
         _ = try await managers()
+    }
+
+    /// Current load/download status, for UI that wants to show progress
+    /// without triggering a load itself.
+    public func loadState() -> ParakeetLoadState {
+        currentLoadState
     }
 
     /// Frees the loaded models (called when switching back to whisper).
@@ -25,11 +49,13 @@ public actor ParakeetBackend: TranscriptionBackend {
         if let (asrManager, _) = try? await loadTask.value {
             await asrManager.cleanup()
         }
+        currentLoadState = .notLoaded
         AppLogger.shared.log(.info, "Parakeet models unloaded")
     }
 
     private func managers() async throws -> (AsrManager, VadManager) {
         if let loadTask { return try await loadTask.value }
+        currentLoadState = .loading
         let task = Task {
             let startTime = Date()
             let version = Self.modelVersion
@@ -45,9 +71,12 @@ public actor ParakeetBackend: TranscriptionBackend {
         }
         loadTask = task
         do {
-            return try await task.value
+            let result = try await task.value
+            currentLoadState = .ready
+            return result
         } catch {
             loadTask = nil
+            currentLoadState = .failed(error.localizedDescription)
             throw AppError.transcriptionFailed("Parakeet model load failed: \(error.localizedDescription)")
         }
     }

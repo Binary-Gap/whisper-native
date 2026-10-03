@@ -10,6 +10,8 @@ public enum AppError: Error, Sendable {
     case accessibilityDenied
     case modelNotFound(URL)
     case audioFileTooSmall(Int)
+    case geminiAPIKeyMissing
+    case keychainFailed(OSStatus)
 }
 
 extension AppError: LocalizedError {
@@ -35,6 +37,10 @@ extension AppError: LocalizedError {
             return "Model not found at \(url.path)"
         case .audioFileTooSmall(let bytes):
             return "Audio file too small (\(bytes) bytes)"
+        case .geminiAPIKeyMissing:
+            return "No Gemini API key. Add one in Settings > General (or set GEMINI_API_KEY)."
+        case .keychainFailed(let status):
+            return "Keychain error (OSStatus \(status))"
         }
     }
 }

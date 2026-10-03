@@ -7,7 +7,7 @@ public actor WhisperClient: TranscriptionBackend {
     private let session: URLSession
     private let decoder = JSONDecoder()
 
-    public init(serverBaseURL: URL = URL(string: "http://127.0.0.1:8080")!) {
+    public init(serverBaseURL: URL = Constants.serverBaseURL) {
         self.serverBaseURL = serverBaseURL
         self.inferenceURL = serverBaseURL.appendingPathComponent("inference")
         self.healthURL = serverBaseURL.appendingPathComponent("health")

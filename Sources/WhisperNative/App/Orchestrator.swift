@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import MusicPause
 import WhisperNativeCore
 
 // Orchestrator owns the recording / transcription state machine.
@@ -16,12 +17,15 @@ final class Orchestrator {
     private let audioRecorder: any AudioRecording
     private let backend: any TranscriptionBackend
     private let parakeetBackend: ParakeetBackend
+    private let geminiBackend: GeminiBackend
     private let textInserter: any TextInserting
     private let indicator: RecordingIndicator
     private let liveTranscriptPill: LiveTranscriptPill
     // Read-only: lets a whisper-engine recording attempt tell a first-run/
     // engine-switch model download apart from an actually-dead server.
     private let modelSectionState: ModelSectionState
+    // Pauses Apple Music from recording start to recording end (Config.pauseMusicWhileRecording).
+    private let musicPauser = MusicPauser(report: { AppLogger.shared.log(.info, $0) })
 
     // MARK: - State
 
@@ -65,8 +69,15 @@ final class Orchestrator {
     // Most recent successful transcript (for handlePasteLast).
     private var lastTranscript: String?
 
-    // Re-transcribes the in-progress recording for LiveTranscriptPill (Parakeet only).
+    // Anchors LiveTranscriptPill and, with Parakeet, re-transcribes the
+    // in-progress recording for it.
     private var livePreviewTask: Task<Void, Never>?
+
+    // Gemini Live session of the current dictation, from recording start until
+    // its transcript is in (or it's cancelled).
+    private var geminiLiveSession: GeminiLiveSession?
+    // Identifies the session whose previews may still reach the pill.
+    private var geminiLivePreviewToken: UUID?
 
     // MARK: - Init
 
@@ -76,6 +87,7 @@ final class Orchestrator {
         audioRecorder: any AudioRecording,
         backend: any TranscriptionBackend,
         parakeetBackend: ParakeetBackend,
+        geminiBackend: GeminiBackend,
         textInserter: any TextInserting,
         indicator: RecordingIndicator,
         liveTranscriptPill: LiveTranscriptPill,
@@ -86,6 +98,7 @@ final class Orchestrator {
         self.audioRecorder = audioRecorder
         self.backend = backend
         self.parakeetBackend = parakeetBackend
+        self.geminiBackend = geminiBackend
         self.textInserter = textInserter
         self.indicator = indicator
         self.liveTranscriptPill = liveTranscriptPill
@@ -138,10 +151,12 @@ final class Orchestrator {
             isRecording = false
             indicator.hide()
             stopLivePreview()
+            musicPauser.resume()
             Task {
                 _ = try? await audioRecorder.stopRecording()
             }
         }
+        cancelGeminiLiveSession()
         AppLogger.shared.log(.info, "Cancel (2nd press): transcription cancelled by user")
     }
 
@@ -176,6 +191,8 @@ final class Orchestrator {
         isTranscribing = false
         indicator.hide()
         stopLivePreview()
+        musicPauser.resume()
+        cancelGeminiLiveSession()
         AppLogger.shared.log(.error, "Recording failed: \(error)")
         showAlert(title: "Recording failed", message: error.localizedDescription)
     }
@@ -183,7 +200,7 @@ final class Orchestrator {
     // MARK: - Private
 
     private func startRecording() async {
-        // Pre-flight health check (Parakeet runs in-process, no server).
+        // Pre-flight health check (whisper only: the other engines use no local server).
         if store.config.transcriptionEngine == .whisper, !(await serverManager.healthCheck()) {
             if modelSectionState.isDownloading {
                 let percent = Int((modelSectionState.downloadProgress * 100).rounded())
@@ -204,6 +221,10 @@ final class Orchestrator {
         indicator.isEnabled = store.config.recordingIndicatorEnabled
         indicator.recordingTimedOut = false
         indicator.show()
+        // Paused before the mic opens so the music doesn't bleed into the recording.
+        if store.config.pauseMusicWhileRecording {
+            musicPauser.pause()
+        }
 
         // Capture frontmost app for post-transcription paste decision.
         recordingFocusedBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -220,17 +241,29 @@ final class Orchestrator {
         let timestampMillis = Int(Date().timeIntervalSince1970 * 1000)
         let wavPath = Constants.historyDirectory.appendingPathComponent("recording_\(timestampMillis).wav")
 
+        let engine = store.config.transcriptionEngine
         do {
             audioRecorder.preferredInputDeviceUID = store.config.inputDeviceUID
             audioRecorder.soundFeedbackEnabled = store.config.soundFeedback
             audioRecorder.soundVolume = store.config.soundVolume
+            // The socket connects while the mic warms up; audio buffers until setup completes.
+            if engine == .geminiLive {
+                startGeminiLiveSession()
+            }
             try await audioRecorder.startRecording(to: wavPath)
             isRecording = true
-            if store.config.transcriptionEngine == .parakeet {
-                startLivePreview(recordingURL: wavPath)
+            switch engine {
+            case .parakeet:
+                startLivePreview(rereading: wavPath)
+            case .geminiLive:
+                startLivePreview(rereading: nil)
+            case .whisper, .gemini:
+                break
             }
         } catch {
+            cancelGeminiLiveSession()
             indicator.hide()
+            musicPauser.resume()
             AppLogger.shared.log(.error, "startRecording failed: \(error)")
             showAlert(title: "Recording failed", message: error.localizedDescription)
         }
@@ -244,18 +277,31 @@ final class Orchestrator {
         let wavURL: URL
         do {
             wavURL = try await audioRecorder.stopRecording()
+            audioRecorder.pcmSink = nil
+            musicPauser.resume()
         } catch {
+            musicPauser.resume()
+            cancelGeminiLiveSession()
             AppLogger.shared.log(.error, "stopRecording failed: \(error)")
             showAlert(title: "Recording error", message: error.localizedDescription)
             return
         }
 
         isTranscribing = true
-        defer { isTranscribing = false }
+        defer {
+            isTranscribing = false
+            // No-op once the session finished; closes it if the engine changed mid-recording.
+            cancelGeminiLiveSession()
+        }
 
         let result: TranscriptionResult
         do {
             result = try await transcribeWithCalibration(recordingURL: wavURL)
+        } catch is CancellationError {
+            // Cancel key during a Gemini Live wait: the socket is closed, no fallback ran.
+            AppLogger.shared.log(.info, "Transcription cancelled before the live transcript arrived")
+            recordHistoryEntry(audioURL: wavURL, text: "", language: store.config.selectedLanguage, durationSeconds: nil, status: .failed)
+            return
         } catch {
             AppLogger.shared.log(.error, "Transcription failed: \(error)")
             // Persist a failed entry so the recording stays rerunnable from History.
@@ -295,6 +341,9 @@ final class Orchestrator {
         } else if sameApp && store.config.autoPasteWhenSameApp {
             do {
                 try await textInserter.insertText(outgoingText)
+                if store.config.autoSubmitInOtherApps && !suppressAutoSubmitForCurrentRecording {
+                    try await textInserter.pressReturn()
+                }
                 playFeedbackSound(named: "Purr")
             } catch {
                 AppLogger.shared.log(.error, "Text insertion failed: \(error)")
@@ -319,12 +368,13 @@ final class Orchestrator {
 
     private static let livePreviewInterval: Duration = .milliseconds(700)
 
-    /// Anchors the pill near the focused text input, then every
-    /// livePreviewInterval re-transcribes everything recorded so far and
-    /// shows it in the pill. Passes run back to back (never overlapping), so a
-    /// slow pass just stretches the interval. The pasted text still comes from
-    /// the normal full transcription at stop.
-    private func startLivePreview(recordingURL: URL) {
+    /// Anchors the pill near the focused text input. With a `recordingURL`
+    /// (Parakeet) it then re-transcribes everything recorded so far every
+    /// livePreviewInterval and shows it in the pill. Passes run back to back
+    /// (never overlapping), so a slow pass just stretches the interval. Gemini
+    /// Live passes nil: its socket events feed the pill instead. The pasted text
+    /// still comes from the full transcription at stop.
+    private func startLivePreview(rereading recordingURL: URL?) {
         livePreviewTask?.cancel()
         let language = store.config.selectedLanguage
         livePreviewTask = Task { [weak self, parakeetBackend] in
@@ -334,6 +384,7 @@ final class Orchestrator {
             guard !Task.isCancelled else { return }
             AppLogger.shared.log(.debug, "Live preview anchor: \(anchor.sourceName)")
             self?.liveTranscriptPill.setAnchor(anchor)
+            guard let recordingURL else { return }
             var lastSampleCount = 0
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.livePreviewInterval)
@@ -354,7 +405,39 @@ final class Orchestrator {
     private func stopLivePreview() {
         livePreviewTask?.cancel()
         livePreviewTask = nil
+        geminiLivePreviewToken = nil
         liveTranscriptPill.hide()
+    }
+
+    // MARK: - Gemini Live
+
+    /// Opens the dictation's Gemini Live socket and routes recorder audio into
+    /// it (the WAV still gets every buffer). Interim transcripts reach the pill
+    /// only while this session's recording runs.
+    private func startGeminiLiveSession() {
+        cancelGeminiLiveSession()
+        let previewToken = UUID()
+        geminiLivePreviewToken = previewToken
+        let session = GeminiLiveBackend.startSession(config: store.config) { [weak self] text in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.isRecording, self.geminiLivePreviewToken == previewToken else { return }
+                    self.liveTranscriptPill.update(text: text)
+                }
+            }
+        }
+        geminiLiveSession = session
+        if let session {
+            audioRecorder.pcmSink = { @Sendable data in session.appendPCM(data) }
+        }
+    }
+
+    /// Closes the live socket without activityEnd; no fallback call follows.
+    private func cancelGeminiLiveSession() {
+        audioRecorder.pcmSink = nil
+        geminiLivePreviewToken = nil
+        geminiLiveSession?.cancel()
+        geminiLiveSession = nil
     }
 
     // MARK: - Voice calibration
@@ -366,9 +449,22 @@ final class Orchestrator {
     /// whisper sufficient acoustic context on its own.
     private func transcribeWithCalibration(recordingURL: URL) async throws -> TranscriptionResult {
         let config = store.config
-        // Calibration primes whisper's acoustic context; Parakeet doesn't use it.
-        if config.transcriptionEngine == .parakeet {
+        // Calibration primes whisper's acoustic context; the other engines don't use it.
+        switch config.transcriptionEngine {
+        case .parakeet:
             return try await parakeetBackend.transcribe(audioFile: recordingURL, config: config)
+        case .gemini:
+            return try await geminiBackend.transcribe(audioFile: recordingURL, config: config)
+        case .geminiLive:
+            return try await GeminiLiveBackend.transcribe(
+                session: geminiLiveSession,
+                audioFile: recordingURL,
+                config: config
+            ) { [geminiBackend] audioFile, config in
+                try await geminiBackend.transcribe(audioFile: audioFile, config: config)
+            }
+        case .whisper:
+            break
         }
         guard config.voiceCalibrationEnabled, config.voiceCalibrationSampleExists else {
             return try await backend.transcribe(audioFile: recordingURL, config: config)
@@ -422,13 +518,24 @@ final class Orchestrator {
         durationSeconds: Double?,
         status: HistoryEntry.Status
     ) {
+        let config = store.config
+        let audioDurationSeconds = try? WavConcatenator.duration(ofWavAt: audioURL)
+        // A failed batch request isn't billed; a failed Live dictation already streamed its audio.
+        let isBilled = status == .success || config.transcriptionEngine == .geminiLive
         let entry = HistoryEntry(
             audioFilePath: audioURL,
             text: text,
             language: language,
-            modelName: store.config.selectedModelName,
+            modelName: config.selectedModelName,
             status: status,
-            durationSeconds: durationSeconds
+            durationSeconds: durationSeconds,
+            audioDurationSeconds: audioDurationSeconds,
+            transcriptionMode: config.transcriptionEngine == .geminiLive ? config.geminiLiveMode.rawValue : nil,
+            estimatedCostUSD: isBilled
+                ? GeminiPricing.estimatedDollars(
+                    modelName: config.selectedModelName, audioSeconds: audioDurationSeconds, text: text
+                )
+                : nil
         )
         TranscriptionHistoryStore.shared.add(entry)
     }

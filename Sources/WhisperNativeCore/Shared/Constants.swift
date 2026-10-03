@@ -1,24 +1,37 @@
 import Foundation
 
 public enum Constants {
+    // Debug builds run as a separate dev app (bundle id `.dev`, project.yml) so
+    // they can run next to the installed Release copy: their own whisper daemon
+    // (launchd label + port), Keychain item, data folder and logs. The models
+    // folder stays shared so dev reuses the downloaded models.
+    #if DEBUG
+    public static let isDevBuild = true
+    #else
+    public static let isDevBuild = false
+    #endif
+    private static let variantSuffix = isDevBuild ? "-dev" : ""
+    private static let dataFolderName = "whisper-native\(variantSuffix)"
+
     public static let serverHost = "127.0.0.1"
-    public static let serverPort = 8080
+    public static let serverPort = isDevBuild ? 8081 : 8080
 
     private static let serverBaseURLString = "http://\(serverHost):\(serverPort)"
+    public static let serverBaseURL = URL(string: serverBaseURLString)!
     public static let serverHealthURL = URL(string: "\(serverBaseURLString)/health")!
     public static let serverInferenceURL = URL(string: "\(serverBaseURLString)/inference")!
     public static let serverLoadURL = URL(string: "\(serverBaseURLString)/load")!
 
     public static let tempDirectory: URL = {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("whisper-native/tmp", isDirectory: true)
+        return appSupport.appendingPathComponent("\(dataFolderName)/tmp", isDirectory: true)
     }()
 
     // Stable store for recordings that back history entries. Files here persist
     // (revealed/played from the History view), unlike the tmp scratch directory.
     public static let historyDirectory: URL = {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("whisper-native/history", isDirectory: true)
+        return appSupport.appendingPathComponent("\(dataFolderName)/history", isDirectory: true)
     }()
 
     public static let historyMetadataURL: URL = {
@@ -28,7 +41,7 @@ public enum Constants {
     public static let logDirectory: URL = {
         let logsBase = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs", isDirectory: true)
-        return logsBase.appendingPathComponent("whisper-native", isDirectory: true)
+        return logsBase.appendingPathComponent(dataFolderName, isDirectory: true)
     }()
 
     // App-owned models directory. whisper-native downloads/scans .bin models here
@@ -54,11 +67,11 @@ public enum Constants {
         defaultModelsDirectory.appendingPathComponent(defaultVadModelFileName)
     }
 
-    public static let whisperServerLaunchdLabel = "io.binarygap.whisper-server"
+    public static let whisperServerLaunchdLabel = isDevBuild ? "io.binarygap.whisper-server.dev" : "io.binarygap.whisper-server"
 
     public static let whisperServerPlistPath: URL = {
         let libraryDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-        return libraryDir.appendingPathComponent("LaunchAgents/io.binarygap.whisper-server.plist")
+        return libraryDir.appendingPathComponent("LaunchAgents/\(whisperServerLaunchdLabel).plist")
     }()
 
     /// Wraps a transcript in the audio-tag markers used across all insertion destinations.
@@ -75,12 +88,14 @@ public enum Constants {
     public static let recordingStartTimeout: TimeInterval = 5
     public static let recordingStopFallbackTimeout: TimeInterval = 3
     public static let recordingTimeoutSeconds = 300
-    public static let maxHistoryItems = 50
+    public static let maxHistoryItems = 5000
+    public static let maxHistoryAudioFiles = 50
+    public static let maxHistoryDisplayedItems = 100
     public static let minValidAudioBytes = 1000
 
     public static let voiceCalibrationSamplePath: URL = {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("whisper-native/voice-calibration-sample.wav")
+        return appSupport.appendingPathComponent("\(dataFolderName)/voice-calibration-sample.wav")
     }()
 
     // Recordings at or above this duration already give whisper enough acoustic

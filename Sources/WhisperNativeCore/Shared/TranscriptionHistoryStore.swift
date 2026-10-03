@@ -5,9 +5,10 @@ import Foundation
 /// atomically re-writes on every mutation, and publishes `entries` (newest first)
 /// so SwiftUI views re-render on add/update/delete.
 ///
-/// The 50-entry cap also deletes the dropped entry's WAV so the history dir does
-/// not grow unbounded. File deletions are best-effort (a locked/missing file
-/// never aborts a mutation).
+/// Keeps the newest `maxItems` entries as a usage log (text and metadata are
+/// small); only the newest `maxAudioFiles` of them keep their WAV, so the
+/// history dir stays bounded.
+/// File deletions are best-effort (a locked/missing file never aborts a mutation).
 @MainActor
 public final class TranscriptionHistoryStore: ObservableObject {
     public static let shared = TranscriptionHistoryStore()
@@ -16,6 +17,7 @@ public final class TranscriptionHistoryStore: ObservableObject {
 
     private let metadataURL: URL
     private let maxItems: Int
+    private let maxAudioFiles: Int
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -30,10 +32,12 @@ public final class TranscriptionHistoryStore: ObservableObject {
 
     public init(
         metadataURL: URL = Constants.historyMetadataURL,
-        maxItems: Int = Constants.maxHistoryItems
+        maxItems: Int = Constants.maxHistoryItems,
+        maxAudioFiles: Int = Constants.maxHistoryAudioFiles
     ) {
         self.metadataURL = metadataURL
         self.maxItems = maxItems
+        self.maxAudioFiles = maxAudioFiles
         reload()
     }
 
@@ -42,6 +46,7 @@ public final class TranscriptionHistoryStore: ObservableObject {
     public func add(_ entry: HistoryEntry) {
         entries.insert(entry, at: 0)
         trimToCap()
+        deleteAgedOutAudioFiles()
         save()
     }
 
@@ -77,11 +82,18 @@ public final class TranscriptionHistoryStore: ObservableObject {
 
     private func trimToCap() {
         guard entries.count > maxItems else { return }
-        let dropped = entries[maxItems...]
-        for entry in dropped {
+        for entry in entries[maxItems...] {
             deleteAudioFile(entry)
         }
         entries = Array(entries.prefix(maxItems))
+    }
+
+    private func deleteAgedOutAudioFiles() {
+        guard entries.count > maxAudioFiles else { return }
+        for entry in entries[maxAudioFiles...]
+        where FileManager.default.fileExists(atPath: entry.audioFilePath.path) {
+            deleteAudioFile(entry)
+        }
     }
 
     private func deleteAudioFile(_ entry: HistoryEntry) {
