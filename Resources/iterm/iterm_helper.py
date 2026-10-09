@@ -13,6 +13,8 @@ Usage:
 
 import argparse
 import asyncio
+import os
+import re
 import sys
 
 import iterm2
@@ -48,6 +50,23 @@ async def cmd_get_cwd(connection, session_id):
     return 1
 
 
+# Foreground programs where a typed newline runs the line as a command.
+SHELL_JOBS = {"zsh", "bash", "sh", "dash", "fish", "ksh", "tcsh", "csh", "nu", "ssh", "mosh-client"}
+
+
+def prepare_text(text, job_name):
+    """Joins the lines with spaces when a shell (or ssh) is in the foreground.
+
+    The text is typed, not pasted, so each newline would run what came before
+    it at a shell prompt. Other programs (TUIs like Claude Code) treat the
+    newline as a line break, so they get the text unchanged.
+    """
+    job = os.path.basename((job_name or "").lstrip("-"))
+    if job not in SHELL_JOBS:
+        return text
+    return re.sub(r"\s*\n\s*", " ", text).strip()
+
+
 async def cmd_send(connection, session_id, text, newline=False):
     """Send text to a session."""
     app = await iterm2.async_get_app(connection)
@@ -55,7 +74,8 @@ async def cmd_send(connection, session_id, text, newline=False):
     if session is None:
         print("session not found", file=sys.stderr)
         return 1
-    await session.async_send_text(text)
+    job_name = await session.async_get_variable("jobName")
+    await session.async_send_text(prepare_text(text, job_name))
     if newline:
         # Send Enter as a separate terminal write, after a short delay.
         # Gluing the CR onto the text makes TUIs (e.g. Claude Code) treat it
@@ -67,7 +87,7 @@ async def cmd_send(connection, session_id, text, newline=False):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="iTerm2 helper for Hammerspoon")
+    parser = argparse.ArgumentParser(description="iTerm2 helper for whisper-native")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("get-session", help="Get current session ID")

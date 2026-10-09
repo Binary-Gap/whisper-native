@@ -176,10 +176,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onToggleStartOnVoice: { [weak self] in
                 self?.toggleStartOnVoice()
             },
+            onCheckForUpdates: {
+                AppUpdater.shared.checkForUpdates()
+            },
             onQuit: {
                 NSApp.terminate(nil)
             }
         )
+
+        // Sparkle: scheduled checks plus the status menu's update item, rebuilt
+        // whenever a check finds a version or the updater becomes busy/idle.
+        let updater = AppUpdater.shared
+        updater.start()
+        updater.$availableVersion.removeDuplicates().map { _ in () }
+            .merge(with: updater.$canCheckForUpdates.removeDuplicates().map { _ in () })
+            .sink { [weak self] in self?.refreshStatusMenu() }
+            .store(in: &cancellables)
 
         // History is the primary window: surface it on launch, unless onboarding
         // is pending, in which case onboarding shows instead and History follows
@@ -600,8 +612,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installTerminationSignalHandler() {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        // The handler runs as a main-queue block, and the main queue doesn't
+        // drain while one of its blocks runs, so the quit reply (a main-actor
+        // Task, a main-queue timeout) would never arrive inside it. A run loop
+        // perform runs terminate outside the queue.
         source.setEventHandler {
-            NSApp.terminate(nil)
+            RunLoop.main.perform { NSApp.terminate(nil) }
         }
         source.resume()
         terminationSignalSource = source
@@ -672,8 +688,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             accessibilityWarning: accessibilityWarning,
             downloadingModel: awaitingFirstRunDownload,
             whisperEngineActive: store.config.transcriptionEngine == .whisper,
-            startOnVoice: store.config.startOnVoice
+            startOnVoice: store.config.startOnVoice,
+            update: updateMenuState
         )
+    }
+
+    private var updateMenuState: UpdateMenuState {
+        let updater = AppUpdater.shared
+        guard updater.isEnabled else { return .hidden }
+        if let version = updater.availableVersion { return .available(version: version) }
+        return .idle(canCheck: updater.canCheckForUpdates)
     }
 
     // MARK: - Start on voice

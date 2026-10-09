@@ -9,6 +9,7 @@ public final class StatusMenuBuilder {
     private let onToggleServer: @MainActor () -> Void
     private let onSelectInputDevice: @MainActor (String?) -> Void
     private let onToggleStartOnVoice: @MainActor () -> Void
+    private let onCheckForUpdates: @MainActor () -> Void
     private let onQuit: @MainActor () -> Void
 
     // Retained so NSMenu can call back to us as its delegate target.
@@ -19,6 +20,7 @@ public final class StatusMenuBuilder {
     private var modelItem: NSMenuItem?
     private var micItem: NSMenuItem?
     private var startOnVoiceItem: NSMenuItem?
+    private var updateItem: NSMenuItem?
 
     // Retained so NSMenuItem's weak `target` stays alive as long as the menu;
     // otherwise items auto-disable (gray out) when AppKit can't validate them.
@@ -33,6 +35,7 @@ public final class StatusMenuBuilder {
         onToggleServer: @escaping @MainActor () -> Void,
         onSelectInputDevice: @escaping @MainActor (String?) -> Void,
         onToggleStartOnVoice: @escaping @MainActor () -> Void,
+        onCheckForUpdates: @escaping @MainActor () -> Void,
         onQuit: @escaping @MainActor () -> Void
     ) {
         self.onShowSettings = onShowSettings
@@ -41,6 +44,7 @@ public final class StatusMenuBuilder {
         self.onToggleServer = onToggleServer
         self.onSelectInputDevice = onSelectInputDevice
         self.onToggleStartOnVoice = onToggleStartOnVoice
+        self.onCheckForUpdates = onCheckForUpdates
         self.onQuit = onQuit
     }
 
@@ -59,6 +63,7 @@ public final class StatusMenuBuilder {
             onOnboarding: onShowOnboarding,
             onToggleServer: onToggleServer,
             onToggleStartOnVoice: onToggleStartOnVoice,
+            onCheckForUpdates: onCheckForUpdates,
             onQuit: onQuit
         )
         actionTarget = target
@@ -152,6 +157,17 @@ public final class StatusMenuBuilder {
 
         menu.addItem(.separator())
 
+        // Updates: "Check for Updates", or "Update to X" once a check found one.
+        // Hidden while the updater is off (dev build without a test feed).
+        let update = NSMenuItem(
+            title: "Check for Updates",
+            action: #selector(ActionTarget.checkForUpdatesAction),
+            keyEquivalent: ""
+        )
+        update.target = target
+        menu.addItem(update)
+        updateItem = update
+
         // Quit
         let quit = NSMenuItem(
             title: "Quit",
@@ -172,7 +188,8 @@ public final class StatusMenuBuilder {
         accessibilityWarning: Bool = false,
         downloadingModel: Bool = false,
         whisperEngineActive: Bool = true,
-        startOnVoice: Bool = false
+        startOnVoice: Bool = false,
+        update: UpdateMenuState = .hidden
     ) -> NSMenu {
         let menu = buildMenu(accessibilityWarning: accessibilityWarning)
         applyDynamicState(
@@ -182,7 +199,8 @@ public final class StatusMenuBuilder {
             selectedInputDeviceUID: selectedInputDeviceUID,
             downloadingModel: downloadingModel,
             whisperEngineActive: whisperEngineActive,
-            startOnVoice: startOnVoice
+            startOnVoice: startOnVoice,
+            update: update
         )
         return menu
     }
@@ -196,7 +214,8 @@ public final class StatusMenuBuilder {
         selectedInputDeviceUID: String?,
         downloadingModel: Bool,
         whisperEngineActive: Bool,
-        startOnVoice: Bool
+        startOnVoice: Bool,
+        update: UpdateMenuState
     ) {
         // A first-run/engine-switch model download is in flight: the daemon isn't
         // bootstrapped yet (it would just crash-loop against the missing model), so
@@ -211,6 +230,16 @@ public final class StatusMenuBuilder {
         serverToggleItem?.isEnabled = !downloadingModel && whisperEngineActive
         modelItem?.title = "Model: \(modelName)"
         startOnVoiceItem?.state = startOnVoice ? .on : .off
+        switch update {
+        case .hidden:
+            updateItem?.isHidden = true
+        case .idle(let canCheck):
+            updateItem?.title = "Check for Updates"
+            updateItem?.isEnabled = canCheck
+        case .available(let version):
+            updateItem?.title = "Update to \(version)"
+            updateItem?.isEnabled = true
+        }
         rebuildMicSubmenu(inputDevices: inputDevices, selectedInputDeviceUID: selectedInputDeviceUID)
     }
 
@@ -249,6 +278,18 @@ public final class StatusMenuBuilder {
     }
 }
 
+// MARK: - UpdateMenuState
+
+/// What the status menu's update item shows.
+public enum UpdateMenuState: Equatable {
+    /// No updater (dev build without a test feed): the item is hidden.
+    case hidden
+    /// "Check for Updates", disabled while a check or install is in flight.
+    case idle(canCheck: Bool)
+    /// A check found this version: "Update to <version>".
+    case available(version: String)
+}
+
 // MARK: - ActionTarget
 
 // NSMenuItem requires an ObjC-compatible target. This thin object bridges
@@ -260,6 +301,7 @@ private final class ActionTarget: NSObject {
     private let onOnboarding: @MainActor () -> Void
     private let onToggleServer: @MainActor () -> Void
     private let onToggleStartOnVoice: @MainActor () -> Void
+    private let onCheckForUpdates: @MainActor () -> Void
     private let onQuit: @MainActor () -> Void
 
     init(
@@ -268,6 +310,7 @@ private final class ActionTarget: NSObject {
         onOnboarding: @escaping @MainActor () -> Void,
         onToggleServer: @escaping @MainActor () -> Void,
         onToggleStartOnVoice: @escaping @MainActor () -> Void,
+        onCheckForUpdates: @escaping @MainActor () -> Void,
         onQuit: @escaping @MainActor () -> Void
     ) {
         self.onSettings = onSettings
@@ -275,6 +318,7 @@ private final class ActionTarget: NSObject {
         self.onOnboarding = onOnboarding
         self.onToggleServer = onToggleServer
         self.onToggleStartOnVoice = onToggleStartOnVoice
+        self.onCheckForUpdates = onCheckForUpdates
         self.onQuit = onQuit
     }
 
@@ -296,6 +340,10 @@ private final class ActionTarget: NSObject {
 
     @objc func startOnVoiceAction() {
         onToggleStartOnVoice()
+    }
+
+    @objc func checkForUpdatesAction() {
+        onCheckForUpdates()
     }
 
     @objc func quitAction() {
@@ -345,6 +393,7 @@ public final class StatusBarController {
         onToggleServer: @escaping @MainActor () -> Void,
         onSelectInputDevice: @escaping @MainActor (String?) -> Void,
         onToggleStartOnVoice: @escaping @MainActor () -> Void,
+        onCheckForUpdates: @escaping @MainActor () -> Void,
         onQuit: @escaping @MainActor () -> Void
     ) {
         menuBuilder = StatusMenuBuilder(
@@ -354,6 +403,7 @@ public final class StatusBarController {
             onToggleServer: onToggleServer,
             onSelectInputDevice: onSelectInputDevice,
             onToggleStartOnVoice: onToggleStartOnVoice,
+            onCheckForUpdates: onCheckForUpdates,
             onQuit: onQuit
         )
         // variableLength so the language code fits next to the icon.
@@ -399,7 +449,8 @@ public final class StatusBarController {
         accessibilityWarning: Bool = false,
         downloadingModel: Bool = false,
         whisperEngineActive: Bool = true,
-        startOnVoice: Bool = false
+        startOnVoice: Bool = false,
+        update: UpdateMenuState = .hidden
     ) {
         currentMenu = menuBuilder.rebuild(
             serverRunning: serverRunning,
@@ -409,7 +460,8 @@ public final class StatusBarController {
             accessibilityWarning: accessibilityWarning,
             downloadingModel: downloadingModel,
             whisperEngineActive: whisperEngineActive,
-            startOnVoice: startOnVoice
+            startOnVoice: startOnVoice,
+            update: update
         )
     }
 

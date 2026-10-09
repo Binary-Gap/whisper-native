@@ -73,6 +73,9 @@ brew install --cask binary-gap/tap/whisper-native
 
 **Requirements:** Apple Silicon, macOS 26 (Tahoe) or later.
 
+The app checks for updates once a day (from 0.3.0 on) and offers them in the
+menu bar menu; Settings > General > Updates can install them automatically.
+
 The app needs Microphone access (to record) and Accessibility access (to
 paste the transcribed text via a synthesized Cmd+V). macOS will prompt for
 both on first use.

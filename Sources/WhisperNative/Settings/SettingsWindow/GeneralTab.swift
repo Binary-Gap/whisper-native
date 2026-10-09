@@ -6,6 +6,7 @@ import WhisperNativeCore
 struct GeneralTab: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject private var keyModel = GeminiKeyModel.shared
+    @ObservedObject private var updater = AppUpdater.shared
 
     var body: some View {
         Form {
@@ -39,9 +40,68 @@ struct GeneralTab: View {
                     isOn: showDockIconBinding
                 )
             }
+
+            updatesSection
         }
         .formStyle(.grouped)
         .onAppear { keyModel.refresh() }
+    }
+
+    private var updatesSection: some View {
+        Section("Updates") {
+            LabeledContent("Version", value: updater.currentVersion)
+            if updater.isEnabled {
+                LabeledToggle(
+                    "Check for updates automatically",
+                    help: "Check once a day. A new version shows in the status menu and here, and installs when you click Install.",
+                    isOn: automaticallyChecksBinding
+                )
+                LabeledToggle(
+                    "Install updates automatically",
+                    help: "Download a new version in the background and install it the next time the app quits. Same setting as the checkbox in the update window.",
+                    unavailableReason: updater.automaticallyChecks ? nil : "Needs automatic checks.",
+                    isOn: automaticallyInstallsBinding
+                )
+                if let version = updater.availableVersion {
+                    LabeledContent {
+                        Button("Install…") { updater.checkForUpdates() }
+                    } label: {
+                        Label("Version \(version) is available", systemImage: "arrow.down.circle.fill")
+                            .foregroundStyle(.tint)
+                    }
+                } else {
+                    LabeledContent {
+                        Button("Check Now") { updater.checkForUpdates() }
+                            .disabled(!updater.canCheckForUpdates)
+                    } label: {
+                        Text(lastCheckText)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Text("The dev build doesn't check for updates.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var lastCheckText: String {
+        guard let date = updater.lastCheckDate else { return "Not checked yet" }
+        return "Last checked \(date.formatted(.relative(presentation: .named)))"
+    }
+
+    private var automaticallyChecksBinding: Binding<Bool> {
+        Binding(
+            get: { updater.automaticallyChecks },
+            set: { updater.automaticallyChecks = $0 }
+        )
+    }
+
+    private var automaticallyInstallsBinding: Binding<Bool> {
+        Binding(
+            get: { updater.automaticallyInstalls },
+            set: { updater.automaticallyInstalls = $0 }
+        )
     }
 
     // Every engine's trade-off and technical details, so the choice can be

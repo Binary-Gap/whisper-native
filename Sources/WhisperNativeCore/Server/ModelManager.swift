@@ -25,23 +25,23 @@ public struct ModelFile: Identifiable, Hashable, Sendable {
 }
 
 /// A known whisper model in the download catalog: the canonical `ggml-*.bin`
-/// filename plus where to fetch it, an approximate on-disk size for the UI
-/// (label, plus bytes for sorting) and a short speed/accuracy hint.
+/// filename plus where to fetch it (with its exact size and checksum), a size
+/// label for the UI and a short speed/accuracy hint.
 public struct CatalogModel: Identifiable, Hashable, Sendable {
     public var id: String { fileName }
     public let fileName: String
-    public let downloadURL: URL
+    public let download: ModelDownload
     public let approxSizeLabel: String
-    public let approxSizeBytes: Int64
     public let hint: String
 
-    public init(fileName: String, downloadURL: URL, approxSizeLabel: String, approxSizeBytes: Int64, hint: String) {
+    public init(fileName: String, download: ModelDownload, approxSizeLabel: String, hint: String) {
         self.fileName = fileName
-        self.downloadURL = downloadURL
+        self.download = download
         self.approxSizeLabel = approxSizeLabel
-        self.approxSizeBytes = approxSizeBytes
         self.hint = hint
     }
+
+    public var sizeBytes: Int64 { download.sizeBytes }
 
     /// The recommended model is the default one (`Constants.defaultModelFileName`).
     public var isRecommended: Bool { fileName == Constants.defaultModelFileName }
@@ -70,8 +70,8 @@ public struct ModelListItem: Identifiable, Hashable, Sendable {
     /// Speed/accuracy hint from the catalog; nil for a model outside it.
     public let hint: String?
     public let isRecommended: Bool
-    /// The catalog download URL, if this model is in the known catalog.
-    public let downloadURL: URL?
+    /// Where to fetch it, if this model is in the known catalog.
+    public let download: ModelDownload?
     /// On-disk location, if the model file exists in the models directory.
     public let localURL: URL?
 
@@ -86,16 +86,21 @@ public enum ModelManager {
     /// Known whisper models offered for download from HuggingFace `ggerganov/whisper.cpp`.
     /// Merged with folder-scanned files so the picker lists every model, downloaded or not.
     public static let catalog: [CatalogModel] = {
-        func hf(_ file: String) -> URL {
-            URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(file)?download=true")!
+        func model(_ fileName: String, _ sizeBytes: Int64, _ sha256: String, label: String, hint: String) -> CatalogModel {
+            CatalogModel(
+                fileName: fileName,
+                download: .whisperModel(fileName, sizeBytes: sizeBytes, sha256: sha256),
+                approxSizeLabel: label,
+                hint: hint
+            )
         }
         return [
-            CatalogModel(fileName: "ggml-tiny.bin", downloadURL: hf("ggml-tiny.bin"), approxSizeLabel: "~75 MB", approxSizeBytes: 77_700_000, hint: "Fastest, least accurate"),
-            CatalogModel(fileName: "ggml-base.bin", downloadURL: hf("ggml-base.bin"), approxSizeLabel: "~142 MB", approxSizeBytes: 148_000_000, hint: "Very fast, basic accuracy"),
-            CatalogModel(fileName: "ggml-small.bin", downloadURL: hf("ggml-small.bin"), approxSizeLabel: "~466 MB", approxSizeBytes: 487_600_000, hint: "Fast, good accuracy"),
-            CatalogModel(fileName: "ggml-medium.bin", downloadURL: hf("ggml-medium.bin"), approxSizeLabel: "~1.5 GB", approxSizeBytes: 1_533_800_000, hint: "Slow, accurate"),
-            CatalogModel(fileName: "ggml-large-v3-turbo.bin", downloadURL: hf("ggml-large-v3-turbo.bin"), approxSizeLabel: "~1.6 GB", approxSizeBytes: 1_624_600_000, hint: "Fast, very accurate"),
-            CatalogModel(fileName: "ggml-large-v3.bin", downloadURL: hf("ggml-large-v3.bin"), approxSizeLabel: "~3.1 GB", approxSizeBytes: 3_095_000_000, hint: "Slowest, most accurate"),
+            model("ggml-tiny.bin", 77_691_713, "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21", label: "~75 MB", hint: "Fastest, least accurate"),
+            model("ggml-base.bin", 147_951_465, "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe", label: "~142 MB", hint: "Very fast, basic accuracy"),
+            model("ggml-small.bin", 487_601_967, "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b", label: "~466 MB", hint: "Fast, good accuracy"),
+            model("ggml-medium.bin", 1_533_763_059, "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208", label: "~1.5 GB", hint: "Slow, accurate"),
+            model("ggml-large-v3-turbo.bin", 1_624_555_275, "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69", label: "~1.6 GB", hint: "Fast, very accurate"),
+            model("ggml-large-v3.bin", 3_095_033_483, "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2", label: "~3.1 GB", hint: "Slowest, most accurate"),
         ]
     }()
 
@@ -126,10 +131,10 @@ public enum ModelManager {
                 fileName: entry.fileName,
                 displayName: entry.displayName,
                 approxSizeLabel: entry.approxSizeLabel,
-                sizeBytes: entry.approxSizeBytes,
+                sizeBytes: entry.sizeBytes,
                 hint: entry.hint,
                 isRecommended: entry.isRecommended,
-                downloadURL: entry.downloadURL,
+                download: entry.download,
                 localURL: onDisk?.url
             )
         }
@@ -144,7 +149,7 @@ public enum ModelManager {
                 sizeBytes: model.sizeBytes,
                 hint: nil,
                 isRecommended: false,
-                downloadURL: nil,
+                download: nil,
                 localURL: model.url
             ))
         }
@@ -185,61 +190,15 @@ public enum ModelManager {
         return entries.first { $0.pathExtension.lowercased() == "bin" && $0.lastPathComponent.lowercased().contains("silero") }
     }
 
-    /// Downloads a file to `destination`, reporting fractional progress (0...1).
-    /// Creates the parent directory if needed. Overwrites any existing file.
+    /// Downloads a model to `destination`, reporting fractional progress (0...1).
+    /// Creates the parent directory if needed. Replaces any existing file only
+    /// once the download has the expected size and checksum.
     public static func download(
-        from url: URL,
+        _ source: ModelDownload,
         to destination: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws {
-        try FileManager.default.createDirectory(
-            at: destination.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-
-        let (bytes, response) = try await URLSession.shared.bytes(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw AppError.serverUnhealthy("model download HTTP error for \(url.lastPathComponent)")
-        }
-        let expected = response.expectedContentLength
-
-        let tmp = destination.appendingPathExtension("partial")
-        FileManager.default.createFile(atPath: tmp.path, contents: nil)
-        let handle = try FileHandle(forWritingTo: tmp)
-        defer { try? handle.close() }
-
-        var received: Int64 = 0
-        var buffer = Data()
-        buffer.reserveCapacity(1 << 20)
-        var lastReported = 0.0
-
-        for try await byte in bytes {
-            buffer.append(byte)
-            if buffer.count >= (1 << 20) {
-                try handle.write(contentsOf: buffer)
-                received += Int64(buffer.count)
-                buffer.removeAll(keepingCapacity: true)
-                if expected > 0 {
-                    let frac = Double(received) / Double(expected)
-                    if frac - lastReported >= 0.01 {
-                        lastReported = frac
-                        progress(frac)
-                    }
-                }
-            }
-        }
-        if !buffer.isEmpty {
-            try handle.write(contentsOf: buffer)
-            received += Int64(buffer.count)
-        }
-        try handle.close()
-
-        // Move the completed download into place atomically.
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
-        }
-        try FileManager.default.moveItem(at: tmp, to: destination)
-        progress(1.0)
-        AppLogger.shared.log(.info, "Downloaded model \(destination.lastPathComponent) (\(received) bytes)")
+        try await ModelDownloader.download(source, to: destination, progress: progress)
+        AppLogger.shared.log(.info, "Downloaded model \(destination.lastPathComponent) (\(source.sizeBytes) bytes)")
     }
 }

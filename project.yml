@@ -36,6 +36,9 @@ packages:
     exactVersion: 6.2.2
   MusicPause:
     path: Packages/MusicPause
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 
 targets:
   WhisperNative:
@@ -47,13 +50,21 @@ targets:
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleName: $(APP_DISPLAY_NAME)
         CFBundleDisplayName: $(APP_DISPLAY_NAME)
-        CFBundleShortVersionString: "0.2.1"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "0.3.0"
+        CFBundleVersion: "4"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         LSUIElement: true
         NSMicrophoneUsageDescription: "WhisperNative needs microphone access to record audio for transcription."
         NSAppleEventsUsageDescription: "WhisperNative pauses Apple Music while you dictate and resumes it afterwards."
         NSPrincipalClass: NSApplication
+        # Sparkle updates: the private half of this key lives only in the
+        # release machine's login Keychain (account "whisper-native"). Archives
+        # are checked before extraction and the appcast must be signed too.
+        # The feed URL comes from AppUpdater, so dev builds can run without one.
+        SUPublicEDKey: 8OEANBoKVeiI2lRhQraWCmxhuo4v2iY/rx3MvsCPbzY= # public key, leak-check:allow
+        SUVerifyUpdateBeforeExtraction: true
+        SURequireSignedFeed: true
+        SUEnableAutomaticChecks: true
     sources:
       - path: Sources/WhisperNative
       - path: Resources/Assets.xcassets
@@ -92,6 +103,7 @@ targets:
       - target: WhisperNativeCore
       - package: KeyboardShortcuts
       - package: MusicPause
+      - package: Sparkle
 
   WhisperNativeCore:
     type: framework
@@ -100,8 +112,8 @@ targets:
       path: Sources/WhisperNativeCore/Shared/Info.plist
       properties:
         CFBundleIdentifier: io.binarygap.whisper-native.core
-        CFBundleShortVersionString: "0.2.1"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "0.3.0"
+        CFBundleVersion: "4"
     sources:
       - path: Sources/WhisperNativeCore
     settings:

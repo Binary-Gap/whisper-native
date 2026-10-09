@@ -8,9 +8,14 @@ public enum ItermBridge {
     public static let bundleIdentifier = "com.googlecode.iterm2"
 
     /// Returns the session ID of the currently focused iTerm2 session, or nil on failure.
-    /// Synchronous, ~200ms (spawns a Python process).
+    /// Synchronous, ~200ms (spawns a Python process), at most 3 s. Never call it on
+    /// the main thread.
     public static func currentSessionID() -> String? {
-        runHelper(arguments: ["get-session"])
+        guard let result = try? ProcessRunner.runSync(pythonPath, arguments: helperArguments(["get-session"]), timeout: 3) else {
+            AppLogger.shared.log(.error, "ItermBridge: failed to launch helper")
+            return nil
+        }
+        return helperOutput(result)
     }
 
     /// Sends text to the given iTerm2 session via the Python API. If `submitWithEnter`
@@ -30,7 +35,13 @@ public enum ItermBridge {
         if submitWithEnter {
             arguments.append("--newline")
         }
-        return runHelper(arguments: arguments) != nil
+        // A stuck helper (e.g. waiting on iTerm2's API consent) is killed, so the
+        // caller falls back to pasting instead of waiting forever.
+        guard let result = try? await ProcessRunner.run(pythonPath, arguments: helperArguments(arguments), timeout: 10) else {
+            AppLogger.shared.log(.error, "ItermBridge: failed to launch helper")
+            return false
+        }
+        return helperOutput(result) != nil
     }
 
     // MARK: - Private
@@ -50,54 +61,25 @@ public enum ItermBridge {
         ]
         for mise in miseLocations {
             guard FileManager.default.isExecutableFile(atPath: mise) else { continue }
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: mise)
-            process.arguments = ["which", "python3"]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = Pipe()
-            do {
-                try process.run()
-                process.waitUntilExit()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !path.isEmpty, process.terminationStatus == 0 {
-                    return path
-                }
-            } catch {
-                continue
-            }
+            guard let result = try? ProcessRunner.runSync(mise, arguments: ["which", "python3"], timeout: 5),
+                  result.exitCode == 0 else { continue }
+            let path = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !path.isEmpty { return path }
         }
         return "/usr/bin/python3"
     }()
 
-    @discardableResult
-    private static func runHelper(arguments: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonPath)
-        process.arguments = [helperScriptURL.path] + arguments
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
+    private static func helperArguments(_ arguments: [String]) -> [String] {
+        [helperScriptURL.path] + arguments
+    }
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            AppLogger.shared.log(.error, "ItermBridge: failed to launch helper: \(error)")
+    /// The helper's trimmed stdout, or nil when it failed or timed out.
+    private static func helperOutput(_ result: ProcessResult) -> String? {
+        guard result.exitCode == 0 else {
+            let reason = result.timedOut ? "timed out" : "exited \(result.exitCode)"
+            AppLogger.shared.log(.warning, "ItermBridge: helper \(reason): \(result.stderr)")
             return nil
         }
-
-        guard process.terminationStatus == 0 else {
-            let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            let errText = String(data: errData, encoding: .utf8) ?? ""
-            AppLogger.shared.log(.warning, "ItermBridge: helper exited \(process.terminationStatus): \(errText)")
-            return nil
-        }
-
-        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (output?.isEmpty == false) ? output : ""
+        return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -31,7 +31,7 @@ final class ModelManagerTests: XCTestCase {
     func testEveryCatalogModelHasAHint() {
         for model in ModelManager.catalog {
             XCTAssertFalse(model.hint.isEmpty, model.fileName)
-            XCTAssertGreaterThan(model.approxSizeBytes, 0, model.fileName)
+            XCTAssertGreaterThan(model.sizeBytes, 0, model.fileName)
         }
     }
 

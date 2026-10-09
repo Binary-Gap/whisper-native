@@ -9,6 +9,7 @@ public enum AppError: Error, Sendable {
     case textInsertionFailed(String)
     case accessibilityDenied
     case modelNotFound(URL)
+    case downloadFailed(String)
     case audioFileTooSmall(Int)
     case geminiAPIKeyMissing
     case keychainFailed(OSStatus)
@@ -35,6 +36,8 @@ extension AppError: LocalizedError {
                 + "The transcript is on the clipboard; paste it manually."
         case .modelNotFound(let url):
             return "Model not found at \(url.path)"
+        case .downloadFailed(let reason):
+            return "Download failed: \(reason)"
         case .audioFileTooSmall(let bytes):
             return "Audio file too small (\(bytes) bytes)"
         case .geminiAPIKeyMissing:

@@ -97,8 +97,8 @@ public final class ModelSectionState: ObservableObject {
     /// Downloads a catalog model (and the VAD model if missing) without
     /// changing the model in use.
     func download(_ item: ModelListItem, store: SettingsStore) {
-        guard item.localURL == nil, let url = item.downloadURL else { return }
-        download(fileName: item.fileName, from: url, statusLabel: item.displayName, selectsWhenDone: false, store: store)
+        guard item.localURL == nil, let source = item.download else { return }
+        download(fileName: item.fileName, from: source, statusLabel: item.displayName, selectsWhenDone: false, store: store)
     }
 
     /// Locks the model list while the server reloads onto the new model. Waits for
@@ -132,7 +132,7 @@ public final class ModelSectionState: ObservableObject {
         let model = ModelManager.recommendedModel
         download(
             fileName: model.fileName,
-            from: model.downloadURL,
+            from: model.download,
             statusLabel: model.displayName,
             selectsWhenDone: true,
             store: store
@@ -156,7 +156,7 @@ public final class ModelSectionState: ObservableObject {
 
         downloadTask = Task {
             do {
-                try await ModelManager.download(from: Constants.vadModelDownloadURL, to: vadDest) { frac in
+                try await ModelManager.download(Constants.vadModelDownload, to: vadDest) { frac in
                     Task { @MainActor in self.downloadProgress = frac }
                 }
                 try Task.checkCancellation()
@@ -189,7 +189,7 @@ public final class ModelSectionState: ObservableObject {
     // each reporting its own progress under `downloadingFileName`. Selects the
     // model on success only with `selectsWhenDone`; posts the "downloaded"
     // notification either way (DownloadNotifier skips it while the app is frontmost).
-    private func download(fileName: String, from url: URL, statusLabel: String, selectsWhenDone: Bool, store: SettingsStore) {
+    private func download(fileName: String, from source: ModelDownload, statusLabel: String, selectsWhenDone: Bool, store: SettingsStore) {
         guard !isDownloading else { return }
         isDownloading = true
         downloadingFileName = fileName
@@ -206,7 +206,7 @@ public final class ModelSectionState: ObservableObject {
                 if needsVad {
                     downloadingFileName = Constants.defaultVadModelFileName
                     downloadStatus = "Downloading VAD model…"
-                    try await ModelManager.download(from: Constants.vadModelDownloadURL, to: vadDest) { frac in
+                    try await ModelManager.download(Constants.vadModelDownload, to: vadDest) { frac in
                         Task { @MainActor in self.downloadProgress = frac }
                     }
                     try Task.checkCancellation()
@@ -215,7 +215,7 @@ public final class ModelSectionState: ObservableObject {
                 }
 
                 downloadStatus = "Downloading \(statusLabel)…"
-                try await ModelManager.download(from: url, to: modelDest) { frac in
+                try await ModelManager.download(source, to: modelDest) { frac in
                     Task { @MainActor in
                         // A VAD-phase callback landing late must not move this file's bar.
                         guard self.downloadingFileName == fileName else { return }

@@ -73,9 +73,11 @@ public enum Constants {
     public static let defaultModelFileName = "ggml-large-v3-turbo.bin"
     public static let defaultVadModelFileName = "ggml-silero-v6.2.0.bin"
 
-    // HuggingFace download URLs seeded on first run.
-    public static let whisperModelDownloadURL = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(defaultModelFileName)?download=true")!
-    public static let vadModelDownloadURL = URL(string: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/\(defaultVadModelFileName)?download=true")!
+    // The VAD model, fetched with the first whisper model download.
+    public static let vadModelDownload = ModelDownload.vadModel(
+        defaultVadModelFileName, sizeBytes: 885_098,
+        sha256: "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987"
+    )
 
     public static var defaultModelPath: URL {
         defaultModelsDirectory.appendingPathComponent(defaultModelFileName)
@@ -83,6 +85,12 @@ public enum Constants {
     public static var defaultVadModelPath: URL {
         defaultModelsDirectory.appendingPathComponent(defaultVadModelFileName)
     }
+
+    /// Sparkle appcast, uploaded as an asset of every GitHub release. Dev builds
+    /// have none, so the installed Release copy is never offered to replace them.
+    public static let updateFeedURL: URL? = isDevBuild
+        ? nil
+        : URL(string: "https://github.com/Binary-Gap/whisper-native/releases/latest/download/appcast.xml")
 
     public static let whisperServerLaunchdLabel = isDevBuild ? "io.binarygap.whisper-server.dev" : "io.binarygap.whisper-server"
 

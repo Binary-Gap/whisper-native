@@ -47,7 +47,7 @@ public actor LaunchdManager {
     // MARK: - Helpers
 
     @discardableResult
-    private func launchctl(_ args: String...) async throws -> ShellResult {
+    private func launchctl(_ args: String...) async throws -> ProcessResult {
         let result = try await shell("/bin/launchctl", args: args)
         if result.exitCode != 0 {
             let stderr = result.stderr.isEmpty ? result.stdout : result.stderr
@@ -56,44 +56,17 @@ public actor LaunchdManager {
         return result
     }
 
-    private func shell(_ executable: String, _ args: String...) async throws -> ShellResult {
+    private func shell(_ executable: String, _ args: String...) async throws -> ProcessResult {
         try await shell(executable, args: args)
     }
 
-    private func shell(_ executable: String, args: [String]) async throws -> ShellResult {
-        try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = args
-
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
-
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
-                return
-            }
-
-            process.waitUntilExit()
-
-            let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-
-            continuation.resume(returning: ShellResult(
-                exitCode: process.terminationStatus,
-                stdout: stdout,
-                stderr: stderr
-            ))
+    // launchctl answers in milliseconds; a stuck one is killed so callers
+    // (engine switches, quit) never wait on it forever.
+    private func shell(_ executable: String, args: [String]) async throws -> ProcessResult {
+        let result = try await ProcessRunner.run(executable, arguments: args, timeout: 10)
+        if result.timedOut {
+            AppLogger.shared.log(.warning, "\(executable) \(args.joined(separator: " ")) timed out and was killed")
         }
+        return result
     }
-}
-
-struct ShellResult: Sendable {
-    let exitCode: Int32
-    let stdout: String
-    let stderr: String
 }
