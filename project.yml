@@ -47,8 +47,8 @@ targets:
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleName: $(APP_DISPLAY_NAME)
         CFBundleDisplayName: $(APP_DISPLAY_NAME)
-        CFBundleShortVersionString: "0.2.0"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "0.2.1"
+        CFBundleVersion: "3"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         LSUIElement: true
         NSMicrophoneUsageDescription: "WhisperNative needs microphone access to record audio for transcription."
@@ -100,8 +100,8 @@ targets:
       path: Sources/WhisperNativeCore/Shared/Info.plist
       properties:
         CFBundleIdentifier: io.binarygap.whisper-native.core
-        CFBundleShortVersionString: "0.2.0"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "0.2.1"
+        CFBundleVersion: "3"
     sources:
       - path: Sources/WhisperNativeCore
     settings:
