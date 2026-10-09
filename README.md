@@ -28,7 +28,7 @@ included.
 
 The whisper.cpp engine runs as a warm `launchd` daemon that stays up between
 dictations, so the model is already loaded when you press the key. With
-the Parakeet engine, a small pill next to the cursor shows the transcript
+Parakeet or Gemini Live, a small pill next to the cursor shows the transcript
 while you are still talking.
 
 ## Engines and privacy
@@ -53,10 +53,13 @@ and enter a key.
 - Live transcript pill while recording (Parakeet and Gemini Live)
 - Optional auto-start when you speak, and an optional stop word that ends the recording when you say it (engines with a live transcript)
 - Custom vocabulary and stop words in a `words.yml` file
+- Microphone noise suppression and echo cancellation (on by default)
+- Optional Apple Music pause while recording, resumed when the recording stops
 - Filler-word removal (uh, hmm, um)
 - Optional line wrapping / sentence-per-line output
 - Transcription history
 - iTerm2 integration: text goes to the session you started recording in, with optional auto-submit
+- Automatic updates: a daily check, optional automatic install
 
 ## Install
 
@@ -179,6 +182,11 @@ Or by hand:
 - `~/Library/Logs/whisper-native`
 - `~/Library/LaunchAgents/io.binarygap.whisper-server.plist`
 - `~/Library/Preferences/io.binarygap.whisper-native.plist`
+
+Neither removes a Gemini API key saved in Settings: it stays in the login
+Keychain until you delete it there (Keychain Access, item
+`io.binarygap.whisper-native.gemini`) or with Remove Key… on the Gemini
+settings page before uninstalling.
 
 ## License
 
