@@ -16,9 +16,8 @@ public enum ServerPlist {
             "-m", modelPath.path,
             "--host", Constants.serverHost,
             "--port", String(Constants.serverPort),
-            "-t", "12",
+            "-t", String(threadCount()),
             "-p", "1",
-            "--convert",
             "--tmp-dir", tmpDir.path,
         ]
 
@@ -31,6 +30,14 @@ public enum ServerPlist {
         }
 
         return args
+    }
+
+    // One thread per active core, capped at 12 (more threads stop helping
+    // once Metal does the heavy lifting).
+    public static func threadCount(
+        activeProcessorCount: Int = ProcessInfo.processInfo.activeProcessorCount
+    ) -> Int {
+        min(max(activeProcessorCount, 1), 12)
     }
 
     public static func generate(

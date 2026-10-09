@@ -107,7 +107,11 @@ extension AppUpdater: SPUUpdaterDelegate {
         availableVersion = nil
     }
 
+    // Sparkle also ends a check that found nothing through here; only real
+    // failures get logged.
     func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
+        let nsError = error as NSError
+        if nsError.domain == SUSparkleErrorDomain, nsError.code == Int(SUError.noUpdateError.rawValue) { return }
         AppLogger.shared.log(.warning, "Update check failed: \(error.localizedDescription)")
     }
 }

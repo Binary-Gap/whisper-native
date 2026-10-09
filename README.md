@@ -10,7 +10,6 @@
 <p align="center">
   <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-FFA24C?style=flat-square&labelColor=131729">
   <img alt="macOS 26 on Apple Silicon" src="https://img.shields.io/badge/macOS_26-Apple_Silicon-6CCBFF?style=flat-square&labelColor=131729">
-  <img alt="234 tests" src="https://img.shields.io/badge/tests-234-52F2B8?style=flat-square&labelColor=131729">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-A495FF?style=flat-square&labelColor=131729">
 </p>
 

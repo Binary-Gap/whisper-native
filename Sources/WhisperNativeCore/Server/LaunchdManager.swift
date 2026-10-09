@@ -33,8 +33,11 @@ public actor LaunchdManager {
     /// Bootouts + disables the service. Idempotent if already stopped.
     public func bootout() async throws {
         let target = guiTarget()
-        // bootout errors if already not loaded — ignore that specific error
-        try? await launchctl("bootout", target, plistPath.path)
+        // bootout fails on a service that isn't loaded, so it only runs on a
+        // loaded one; a failure there is logged and the disable still runs.
+        if await isLoaded() {
+            try? await launchctl("bootout", target, plistPath.path)
+        }
         try await launchctl("disable", "\(target)/\(label)")
     }
 
