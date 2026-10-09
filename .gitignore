@@ -1,0 +1,37 @@
+# Generated Xcode project (source of truth is project.yml)
+*.xcodeproj/
+xcuserdata/
+
+# Build artifacts
+build/
+DerivedData/
+
+# whisper.cpp source is cloned + built by `mise run whisper:build` (pinned tag
+# in mise.toml), never checked in.
+external/
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# mise local overrides (real APPLE_TEAM_ID lives here)
+mise.local.toml
+
+# Secrets
+fnox.toml
+
+# Release (private, not for public repo)
+fastlane/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Icon generation intermediates (only the committed Assets.xcassets + master matter)
+build-assets/
+claude.sh
+
+# Internal notes (not for the public repo)
+.private/
+.superpowers/
+CLAUDE.local.md
