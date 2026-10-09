@@ -39,7 +39,7 @@ Pick the engine in Settings > General.
 |--------|---------------|----------------|-------|
 | whisper.cpp `large-v3-turbo` (default) | On your Mac, warm `launchd` daemon | ~1.6 GB | Any of whisper.cpp's ~100 languages, plus auto-detect. Smaller models on the Whisper settings page |
 | Parakeet TDT v3 | On your Mac, in-process via FluidAudio | ~500 MB | Faster, with a live transcript pill while you talk |
-| Gemini (experimental, optional) | **Cloud: your audio is sent to Google** | none | Needs your own Gemini API key, stored in the macOS Keychain. Gemini Live also shows the live pill |
+| Gemini (optional) | **Cloud: your audio is sent to Google** | none | Needs your own Gemini API key, stored in the macOS Keychain. Gemini Live also shows the live pill |
 
 With whisper.cpp or Parakeet, audio and text stay on your Mac and dictation
 works offline once the model is downloaded. Gemini is off unless you pick it

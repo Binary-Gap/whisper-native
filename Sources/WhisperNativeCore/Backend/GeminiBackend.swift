@@ -1,6 +1,6 @@
 import Foundation
 
-/// Experimental cloud engine: sends the finished recording to Gemini's
+/// Cloud engine: sends the finished recording to Gemini's
 /// `gemini-3.5-transcribe` model through the Interactions API and runs the text
 /// through the same post-processing as Parakeet. Audio goes inline as base64
 /// (no Files API), so recordings are capped at the 20 MB inline request limit

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Experimental streaming engine: turns a finished `GeminiLiveSession` into a
+/// Streaming engine: turns a finished `GeminiLiveSession` into a
 /// transcript with the same post-processing as the batch Gemini engine. When
 /// the live session failed (connect error, socket drop, timeout) or never
 /// started, it falls back to one batch call on the recorded WAV. A cancelled

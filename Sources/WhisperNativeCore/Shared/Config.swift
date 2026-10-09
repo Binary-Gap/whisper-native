@@ -88,8 +88,8 @@ public enum CancelKey: String, Codable, Sendable, CaseIterable, Identifiable {
 
 /// Speech-to-text engine used for dictation. Whisper runs in the whisper-server
 /// launchd daemon; Parakeet (TDT v3 via FluidAudio) runs in-process on the
-/// Neural Engine; Gemini (experimental) sends the finished recording to Google's
-/// Gemini API; Gemini Live (experimental) streams audio to Gemini's Live API
+/// Neural Engine; Gemini sends the finished recording to Google's
+/// Gemini API; Gemini Live streams audio to Gemini's Live API
 /// while recording. The whisper daemon is booted out while a non-whisper engine
 /// is selected.
 public enum TranscriptionEngine: String, Codable, Sendable, CaseIterable, Identifiable {

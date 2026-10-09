@@ -23,7 +23,7 @@ struct GeminiPage: View {
                 EngineActivationRow(
                     store: store,
                     title: "Gemini",
-                    info: "Experimental cloud engine: sends your audio to Google's Gemini 3.5 Transcribe, so it needs an API key and internet. 85+ languages.",
+                    info: "Cloud engine: sends your audio to Google's Gemini 3.5 Transcribe, so it needs an API key and internet. 85+ languages.",
                     shortName: "Gemini",
                     engines: Self.geminiEngines,
                     engineToUse: EngineChoice.gemini.engine(geminiStreaming: store.config.geminiStreaming),

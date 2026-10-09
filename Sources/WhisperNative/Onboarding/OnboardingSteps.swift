@@ -116,7 +116,7 @@ struct EngineModelStepView: View {
     }
 
     var body: some View {
-        FormStep(intro: "The engine is what turns audio into text. Whisper and Parakeet run locally; Gemini is a cloud experiment.") {
+        FormStep(intro: "The engine is what turns audio into text. Whisper and Parakeet run locally; Gemini runs in the cloud.") {
             Section {
                 Picker("Engine", selection: engineChoice) {
                     ForEach(EngineChoice.allCases) { option in

@@ -22,9 +22,9 @@ extension TranscriptionEngine {
         case .parakeet:
             "Faster, shows a live transcript while you talk, 25 European languages. Model downloads on first use (~500 MB)."
         case .gemini:
-            "Experimental cloud engine: sends audio to Google's Gemini API. Needs an API key and internet, 85+ languages."
+            "Cloud engine: sends audio to Google's Gemini API. Needs an API key and internet, 85+ languages."
         case .geminiLive:
-            "Experimental cloud engine: streams audio to Google's Gemini Live API and shows a live transcript while you talk. Needs an API key and internet."
+            "Cloud engine: streams audio to Google's Gemini Live API and shows a live transcript while you talk. Needs an API key and internet."
         }
     }
 }

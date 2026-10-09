@@ -45,7 +45,7 @@ public enum EngineChoice: String, CaseIterable, Identifiable, Sendable {
         case .parakeet:
             "NVIDIA Parakeet TDT v3 on the Neural Engine (FluidAudio). The model downloads on first use (~500 MB)."
         case .gemini:
-            "Experimental. Gemini 3.5 Transcribe: Live delivery streams audio while you talk (Live API), After recording sends the whole recording once you stop."
+            "Gemini 3.5 Transcribe: Live delivery streams audio while you talk (Live API), After recording sends the whole recording once you stop."
         }
     }
 
