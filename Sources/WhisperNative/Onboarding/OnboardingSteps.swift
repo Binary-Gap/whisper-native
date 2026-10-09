@@ -75,7 +75,7 @@ struct WelcomeStepView: View {
                     .font(.title.weight(.semibold))
             }
             StepIntro(text: "Whisper Native turns speech into text anywhere on your Mac. Tap a key, talk, tap again, and the text is typed where your cursor is.")
-            StepIntro(text: "Everything runs on this Mac. Audio never leaves your computer, there is no account, and it works offline once a model is downloaded.")
+            StepIntro(text: "The Whisper and Parakeet engines run entirely on this Mac: audio never leaves your computer, there is no account, and they work offline once a model is downloaded. Gemini, an optional cloud engine, sends the audio to Google.")
             StepIntro(text: "It exists because typing long prompts, messages and notes is slower than saying them, and built-in dictation is either cloud-based or not accurate enough for mixed languages and technical words.")
             StepIntro(text: "This guide takes about a minute. Skip it any time; everything here also lives in Settings.")
             Spacer(minLength: 0)
@@ -245,10 +245,12 @@ struct PermissionsStepView: View {
                         Button("Grant Accessibility") { permissions.promptAccessibility() }
                     }
                 }
-                Text("In System Settings, turn on WhisperNative. If it's already on but this still says Not granted, remove it with − and add it again.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if !permissions.accessibilityGranted {
+                    Text("In System Settings, turn on WhisperNative. If it's already on but this still says Not granted, remove it with − and add it again.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .onAppear { permissions.startMonitoring() }
@@ -388,10 +390,62 @@ struct AudioTagsStepView: View {
     }
 }
 
+// MARK: - More in Settings
+
+/// A short tour of features the earlier steps don't set up, so onboarding
+/// stays short as the app grows: one line each, grouped by where it lives.
+struct MoreInSettingsStepView: View {
+    private struct Feature: Identifiable {
+        let name: String
+        let summary: String
+        var id: String { name }
+    }
+
+    private let groups: [(place: String, features: [Feature])] = [
+        ("Settings › Recording", [
+            Feature(name: "Auto-start when you speak", summary: "Recording starts when you start talking, no key needed."),
+            Feature(name: "Stop word", summary: "Say \"over\" to stop and paste (Parakeet and Gemini Live)."),
+            Feature(name: "Noise suppression", summary: "Cleans up background noise and echo. On by default."),
+            Feature(name: "Pause music", summary: "Pauses Apple Music while you dictate."),
+        ]),
+        ("Settings › Output", [
+            Feature(name: "Auto-submit", summary: "Presses Return after pasting, in terminals or any app."),
+            Feature(name: "Line formatting", summary: "Wrap long lines or put each sentence on its own line."),
+        ]),
+        ("Settings › Whisper, Gemini", [
+            Feature(name: "Custom vocabulary", summary: "Names and jargon the engine should spell right."),
+        ]),
+        ("Settings › General", [
+            Feature(name: "Updates", summary: "Checks daily; can install new versions when you quit."),
+        ]),
+        ("History", [
+            Feature(name: "Rerun", summary: "Transcribe one of the last 50 recordings again with the current engine."),
+        ]),
+    ]
+
+    var body: some View {
+        FormStep(intro: "A few more things you can turn on later, no need to set them up now.") {
+            ForEach(groups, id: \.place) { group in
+                Section(group.place) {
+                    ForEach(group.features) { feature in
+                        LabeledContent(feature.name) {
+                            Text(feature.summary)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Done
 
 struct DoneStepView: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject var modelSectionState: ModelSectionState
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
@@ -407,10 +461,27 @@ struct DoneStepView: View {
                 bullet(Text("The menu-bar icon shows the current language and opens History, Settings and this guide (Setup Guide)."))
                 bullet(Text("Every transcript is saved in History, so nothing is lost if it lands in the wrong window."))
             }
+            if let modelNotice {
+                Label(modelNotice, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer(minLength: 0)
         }
         .padding(DesignSystem.Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Whisper is the engine but has no model to run yet: say what happens
+    /// next instead of letting "You're all set" promise a working dictation.
+    private var modelNotice: String? {
+        guard store.config.transcriptionEngine == .whisper else { return nil }
+        if modelSectionState.isDownloading {
+            return "The Whisper model is still downloading. Dictation works once it finishes."
+        }
+        guard !modelSectionState.hasLocalModel else { return nil }
+        let model = ModelManager.recommendedModel
+        return "No Whisper model is downloaded yet. After Finish you'll be asked to download \(model.displayName) (\(model.approxSizeLabel)); dictation works once it's done."
     }
 
     private var hotkeyLine: Text {

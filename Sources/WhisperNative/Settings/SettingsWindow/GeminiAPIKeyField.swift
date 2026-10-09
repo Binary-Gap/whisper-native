@@ -55,7 +55,7 @@ struct GeminiAPIKeyField: View {
 
     var body: some View {
         Group {
-            SecureField("Gemini API key", text: $apiKey)
+            SecureField("Gemini API key", text: $apiKey, prompt: Text("Paste your key from Google AI Studio"))
                 .focused($isFocused)
                 .onSubmit(commitField)
                 .onChange(of: isFocused) { _, focused in

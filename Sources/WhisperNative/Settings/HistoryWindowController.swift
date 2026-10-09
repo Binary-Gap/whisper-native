@@ -9,11 +9,12 @@ import WhisperNativeCore
 public final class HistoryWindowController: NSWindowController, NSWindowDelegate {
     private let store: SettingsStore
 
-    public init(store: SettingsStore, onOpenSettings: @escaping @MainActor () -> Void) {
+    public init(store: SettingsStore, modelSectionState: ModelSectionState, onOpenSettings: @escaping @MainActor () -> Void) {
         self.store = store
         let view = HistoryView(
             store: store,
             historyStore: TranscriptionHistoryStore.shared,
+            modelSectionState: modelSectionState,
             onOpenSettings: onOpenSettings
         )
         let host = NSHostingController(rootView: view)
@@ -56,6 +57,7 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
 private struct HistoryView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var historyStore: TranscriptionHistoryStore
+    @ObservedObject var modelSectionState: ModelSectionState
     let onOpenSettings: @MainActor () -> Void
     @StateObject private var viewModel = HistoryViewModel()
     @State private var searchQuery = ""
@@ -143,6 +145,9 @@ private struct HistoryView: View {
                     .keyboardShortcut(",", modifiers: .command)
                 }
                 HistorySearchField(text: $searchQuery)
+                if modelSectionState.isDownloading {
+                    ModelDownloadBanner(state: modelSectionState)
+                }
             }
             .padding(.horizontal, DesignSystem.Spacing.lg)
             .padding(.top, DesignSystem.Spacing.md)
@@ -151,6 +156,28 @@ private struct HistoryView: View {
             .background(.bar)
         }
         .onDisappear { viewModel.stopPlayback() }
+    }
+}
+
+// MARK: - ModelDownloadBanner
+
+/// Live progress of a running whisper model download. History is the window
+/// that opens after onboarding, right when the first model download starts,
+/// so it shows the same progress as the Whisper settings page.
+private struct ModelDownloadBanner: View {
+    @ObservedObject var state: ModelSectionState
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.md) {
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+                Text(state.downloadStatus)
+                    .font(.callout)
+                ProgressView(value: state.downloadProgress)
+            }
+            Text("\(Int(state.downloadProgress * 100))%")
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

@@ -86,8 +86,10 @@ struct OnboardingView: View {
                 LanguageStepView(store: store)
             case .audioTags:
                 AudioTagsStepView(store: store)
+            case .moreInSettings:
+                MoreInSettingsStepView()
             case .done:
-                DoneStepView(store: store)
+                DoneStepView(store: store, modelSectionState: modelSectionState)
             }
         }
         .id(navigation.step)

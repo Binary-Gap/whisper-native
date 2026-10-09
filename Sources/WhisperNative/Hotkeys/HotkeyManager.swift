@@ -46,6 +46,10 @@ public final class HotkeyManager: ObservableObject {
     // (re)install and by the self-heal poll, which runs while it is false.
     @Published public private(set) var accessibilityGranted = AXIsProcessTrusted()
 
+    // A missing grant is the normal state on a fresh install and every tap
+    // reinstall hits it, so it is logged once per untrusted stretch.
+    private var loggedMissingAccessibility = false
+
     public init() {}
 
     deinit {
@@ -199,7 +203,10 @@ public final class HotkeyManager: ObservableObject {
         // tapCreate returns non-nil but the tap never receives events. So the grant
         // must be checked explicitly; tapCreate success is not proof of permission.
         guard trusted else {
-            AppLogger.shared.log(.error, "Modifier-key toggle unavailable — Accessibility permission missing or stale. Grant it in System Settings; the hotkey activates automatically once trusted, no relaunch needed.")
+            if !loggedMissingAccessibility {
+                AppLogger.shared.log(.info, "Modifier-key toggle waiting for Accessibility permission; it activates once granted, no relaunch needed.")
+                loggedMissingAccessibility = true
+            }
             modifierToggleAvailable = false
             startAccessibilityPoll()
             return
@@ -258,6 +265,7 @@ public final class HotkeyManager: ObservableObject {
                 self.removeModifierEventTap()
                 self.installModifierEventTap()
                 if self.modifierToggleAvailable {
+                    self.loggedMissingAccessibility = false
                     AppLogger.shared.log(.info, "Accessibility granted — paste and modifier-key toggle available without relaunch.")
                     self.onAvailabilityChanged?()
                 }

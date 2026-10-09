@@ -55,11 +55,48 @@ struct ToggleDictationControls: View {
                 }
             }
 
+            if store.config.toggleModifierKey == .fn {
+                GlobeKeyWarning()
+            }
+
             if showsFooter {
                 Text(Self.footer(for: store.config.toggleModifierKey))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+// MARK: - Globe key warning
+
+/// Orange line + "Open Keyboard Settings" while the Globe key still has an
+/// action, re-read every second while visible so it clears as soon as the
+/// user picks "Do Nothing".
+private struct GlobeKeyWarning: View {
+    @State private var action = GlobeKeyAction.current
+
+    var body: some View {
+        Group {
+            if let warning = action.fnConflictWarning {
+                HStack(alignment: .firstTextBaseline, spacing: DesignSystem.Spacing.md) {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: DesignSystem.Spacing.sm)
+                    Button("Open Keyboard Settings") {
+                        NSWorkspace.shared.open(GlobeKeyAction.keyboardSettingsURL)
+                    }
+                }
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                let latest = GlobeKeyAction.current
+                if latest != action { action = latest }
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }

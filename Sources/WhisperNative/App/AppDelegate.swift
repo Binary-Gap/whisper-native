@@ -104,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settingsWindowController = settingsWindowController
         historyWindowController = HistoryWindowController(
             store: store,
+            modelSectionState: modelSectionState,
             onOpenSettings: { [weak settingsWindowController] in
                 settingsWindowController?.show()
             }
