@@ -153,8 +153,9 @@ public struct Config: Codable, Sendable {
     /// reconnects/renames; nil means use the system default input device.
     public var inputDeviceUID: String?
     /// Run the mic through macOS voice processing (noise suppression and
-    /// automatic gain) for hotkey-started recordings and the calibration
-    /// sample; see `VoiceProcessingPolicy`. Read at recording start.
+    /// automatic gain) for recordings and the calibration sample. Never on
+    /// together with `startOnVoice` (`VoiceProcessingPolicy.resolveExclusive`).
+    /// Read at recording start.
     public var voiceProcessing: Bool
     public var autoPasteWhenSameApp: Bool
     public var soundFeedback: Bool

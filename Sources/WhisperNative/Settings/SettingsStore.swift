@@ -8,9 +8,27 @@ import WhisperNativeCore
 public final class SettingsStore: ObservableObject {
     public static let shared = SettingsStore()
 
+    // Every change path (Settings, status menu, hotkey) lands here, so this is
+    // where voice processing and Start on voice are kept exclusive.
     @Published public var config: Config {
-        didSet { save() }
+        didSet {
+            let resolved = VoiceProcessingPolicy.resolveExclusive(previous: oldValue, current: config)
+            if let turnedOff = resolved.turnedOff {
+                config = resolved.config
+                AppLogger.shared.log(.info, "Turned off \(turnedOff) to keep voice processing and Start on voice exclusive")
+            }
+            if resolved.turnedOff != nil
+                || oldValue.voiceProcessing != config.voiceProcessing
+                || oldValue.startOnVoice != config.startOnVoice {
+                lastExclusiveTurnOff = resolved.turnedOff
+            }
+            save()
+        }
     }
+
+    /// The setting the last voice processing / Start on voice change turned
+    /// off, shown under it in Settings until either setting changes again.
+    @Published public private(set) var lastExclusiveTurnOff: ExclusiveMicSetting?
 
     private let defaults: UserDefaults
     private let encoder = JSONEncoder()
@@ -21,7 +39,7 @@ public final class SettingsStore: ObservableObject {
         defaults = .standard
         if let data = defaults.data(forKey: Self.configKey),
            let decoded = try? decoder.decode(Config.self, from: data) {
-            config = decoded
+            config = VoiceProcessingPolicy.resolveExclusive(previous: decoded, current: decoded).config
         } else {
             config = .defaults
         }

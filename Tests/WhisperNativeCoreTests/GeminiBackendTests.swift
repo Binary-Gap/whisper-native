@@ -82,8 +82,10 @@ final class GeminiBackendTests: XCTestCase {
         XCTAssertEqual(try GeminiBackend.parseTranscript(from: body), "Hello world.")
     }
 
-    func testMissingStepsThrows() {
-        XCTAssertThrowsError(try GeminiBackend.parseTranscript(from: Data(#"{"status":"completed"}"#.utf8)))
+    func testMissingStepsThrowsEmpty() {
+        XCTAssertThrowsError(try GeminiBackend.parseTranscript(from: Data(#"{"status":"completed"}"#.utf8))) { error in
+            guard case AppError.transcriptionEmpty = error else { return XCTFail("unexpected error: \(error)") }
+        }
     }
 
     // MARK: - Error parsing

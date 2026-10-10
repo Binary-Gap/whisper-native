@@ -209,7 +209,8 @@ final class GeminiLiveProtocolTests: XCTestCase {
         let result = try await GeminiLiveBackend.transcribe(
             session: nil,
             audioFile: URL(fileURLWithPath: "/nonexistent.wav"),
-            config: Config()
+            config: Config(),
+            speechCheck: { _ in .unknown }
         ) { audioFile, config in
             await calls.increment()
             return TranscriptionResult(text: "batch", language: config.selectedLanguage, durationSeconds: 0, audioFilePath: audioFile)
@@ -228,13 +229,58 @@ final class GeminiLiveProtocolTests: XCTestCase {
             _ = try await GeminiLiveBackend.transcribe(
                 session: session,
                 audioFile: URL(fileURLWithPath: "/nonexistent.wav"),
-                config: Config()
+                config: Config(),
+                speechCheck: { _ in .unknown }
             ) { _, _ in
                 await calls.increment()
                 throw AppError.transcriptionEmpty
             }
             XCTFail("Expected CancellationError")
         } catch is CancellationError {
+            // expected
+        }
+        let count = await calls.count
+        XCTAssertEqual(count, 0)
+    }
+
+    func testSilentRecordingSkipsTheWaitAndTheFallback() async throws {
+        // Never started, so the session has no text and cancel() touches no network.
+        let session = GeminiLiveSession(apiKey: "unused", languageCodes: [], mode: .verbatim)
+        let calls = CallCounter()
+        let startTime = Date()
+        do {
+            _ = try await GeminiLiveBackend.transcribe(
+                session: session,
+                audioFile: URL(fileURLWithPath: "/nonexistent.wav"),
+                config: Config(),
+                speechCheck: { _ in .silence }
+            ) { _, _ in
+                await calls.increment()
+                throw AppError.transcriptionFailed("fallback ran")
+            }
+            XCTFail("Expected transcriptionEmpty")
+        } catch AppError.transcriptionEmpty {
+            // expected
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(startTime), GeminiLiveBackend.finalTranscriptTimeout)
+        let count = await calls.count
+        XCTAssertEqual(count, 0)
+    }
+
+    func testSilentRecordingWithoutSessionSkipsTheFallback() async throws {
+        let calls = CallCounter()
+        do {
+            _ = try await GeminiLiveBackend.transcribe(
+                session: nil,
+                audioFile: URL(fileURLWithPath: "/nonexistent.wav"),
+                config: Config(),
+                speechCheck: { _ in .silence }
+            ) { _, _ in
+                await calls.increment()
+                throw AppError.transcriptionFailed("fallback ran")
+            }
+            XCTFail("Expected transcriptionEmpty")
+        } catch AppError.transcriptionEmpty {
             // expected
         }
         let count = await calls.count

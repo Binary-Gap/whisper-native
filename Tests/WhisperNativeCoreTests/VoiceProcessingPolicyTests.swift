@@ -51,10 +51,38 @@ final class VoiceProcessingPolicyTests: XCTestCase {
         )
     }
 
-    func testStartOnVoiceNoteShowsOnlyWithBothOn() {
-        XCTAssertNotNil(VoiceProcessingPolicy.startOnVoiceNote(voiceProcessing: true, startOnVoice: true))
-        XCTAssertNil(VoiceProcessingPolicy.startOnVoiceNote(voiceProcessing: true, startOnVoice: false))
-        XCTAssertNil(VoiceProcessingPolicy.startOnVoiceNote(voiceProcessing: false, startOnVoice: true))
-        XCTAssertNil(VoiceProcessingPolicy.startOnVoiceNote(voiceProcessing: false, startOnVoice: false))
+    func testTurningVoiceProcessingOnTurnsStartOnVoiceOff() {
+        let previous = Config(voiceProcessing: false, startOnVoice: true)
+        let current = Config(voiceProcessing: true, startOnVoice: true)
+        let resolved = VoiceProcessingPolicy.resolveExclusive(previous: previous, current: current)
+        XCTAssertTrue(resolved.config.voiceProcessing)
+        XCTAssertFalse(resolved.config.startOnVoice)
+        XCTAssertEqual(resolved.turnedOff, .startOnVoice)
+    }
+
+    func testTurningStartOnVoiceOnTurnsVoiceProcessingOff() {
+        let previous = Config(voiceProcessing: true, startOnVoice: false)
+        let current = Config(voiceProcessing: true, startOnVoice: true)
+        let resolved = VoiceProcessingPolicy.resolveExclusive(previous: previous, current: current)
+        XCTAssertFalse(resolved.config.voiceProcessing)
+        XCTAssertTrue(resolved.config.startOnVoice)
+        XCTAssertEqual(resolved.turnedOff, .voiceProcessing)
+    }
+
+    func testOlderConfigWithBothOnKeepsStartOnVoice() {
+        let both = Config(voiceProcessing: true, startOnVoice: true)
+        let resolved = VoiceProcessingPolicy.resolveExclusive(previous: both, current: both)
+        XCTAssertFalse(resolved.config.voiceProcessing)
+        XCTAssertTrue(resolved.config.startOnVoice)
+    }
+
+    func testAtMostOneOnIsLeftAlone() {
+        for (voiceProcessing, startOnVoice) in [(true, false), (false, true), (false, false)] {
+            let current = Config(voiceProcessing: voiceProcessing, startOnVoice: startOnVoice)
+            let resolved = VoiceProcessingPolicy.resolveExclusive(previous: Config(voiceProcessing: true, startOnVoice: true), current: current)
+            XCTAssertEqual(resolved.config.voiceProcessing, voiceProcessing)
+            XCTAssertEqual(resolved.config.startOnVoice, startOnVoice)
+            XCTAssertNil(resolved.turnedOff)
+        }
     }
 }

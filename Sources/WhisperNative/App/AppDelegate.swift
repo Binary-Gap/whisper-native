@@ -327,15 +327,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
         observeLockAndSleepForVoiceStart()
 
-        // Voice processing takes ~0.5 s to set up, so it's ready before the
-        // first hotkey dictation and rebuilt on a new input device.
-        store.$config
-            .map { ($0.voiceProcessing, $0.inputDeviceUID) }
-            .removeDuplicates { $0 == $1 }
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.orchestrator.voiceProcessingSettingsChanged() }
-            .store(in: &cancellables)
-
         // A model download starting or finishing needs the status menu redrawn;
         // and once it finishes, the daemon that ensureWhisperServerRunning /
         // applyEngine skipped bootstrapping (missing model file) needs to start.

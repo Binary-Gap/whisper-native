@@ -110,10 +110,6 @@ public enum Constants {
     // word isn't recorded into the low-level warmup ramp.
     public static let micWarmupDelay: TimeInterval = 0.25
 
-    // Quiet time after the last default input/output change before the prepared
-    // voice-processing engine is rebuilt for the new devices.
-    public static let voiceEngineRebuildDelay: TimeInterval = 1.0
-
     // Start on voice: seconds of listened audio kept ahead of the detection and
     // written at the head of the recording. Detection lands ~0.5-0.8 s after
     // the first syllable, so this keeps the opening word plus a little silence.

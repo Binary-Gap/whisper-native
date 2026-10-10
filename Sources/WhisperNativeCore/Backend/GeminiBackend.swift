@@ -217,7 +217,8 @@ public actor GeminiBackend: TranscriptionBackend {
             .compactMap(\.text)
             .joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw AppError.transcriptionFailed("Gemini returned no transcript") }
+        // Gemini answers silence with no text item at all.
+        guard !text.isEmpty else { throw AppError.transcriptionEmpty }
         return text
     }
 

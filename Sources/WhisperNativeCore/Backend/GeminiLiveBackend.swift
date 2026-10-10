@@ -4,7 +4,10 @@ import Foundation
 /// transcript with the same post-processing as the batch Gemini engine. When
 /// the live session failed (connect error, socket drop, timeout) or never
 /// started, it falls back to one batch call on the recorded WAV. A cancelled
-/// session rethrows `CancellationError` with no fallback call.
+/// session rethrows `CancellationError` with no fallback call. A recording the
+/// local speech check finds silent ends in `transcriptionEmpty` with neither
+/// the final-transcript wait (when the session streamed no text either) nor
+/// the fallback call.
 public enum GeminiLiveBackend {
     /// How long stop waits for the final transcript before falling back.
     public static let finalTranscriptTimeout: TimeInterval = 5
@@ -40,11 +43,26 @@ public enum GeminiLiveBackend {
         session: GeminiLiveSession?,
         audioFile: URL,
         config: Config,
+        speechCheck: @Sendable (URL) async -> SpeechPresence = SpeechPresence.check(audioFile:),
         fallback: @Sendable (URL, Config) async throws -> TranscriptionResult
     ) async throws -> TranscriptionResult {
         let startTime = Date()
+        var presence: SpeechPresence?
         let fallbackReason: String
         if let session {
+            // Text already streamed back means speech; without any, a silent
+            // clip would wait out the final-transcript timeout for nothing.
+            let metrics = session.metrics
+            if metrics.interimCount > 0 || metrics.finalSegmentCount > 0 {
+                presence = .speech
+            } else {
+                presence = await speechCheck(audioFile)
+                if presence == .silence {
+                    session.cancel()
+                    AppLogger.shared.log(.info, "Gemini Live: no speech in the recording, skipping the transcript wait")
+                    throw AppError.transcriptionEmpty
+                }
+            }
             do {
                 let rawText = try await session.finish(timeout: finalTranscriptTimeout)
                 log(session.metrics, fallback: nil)
@@ -72,6 +90,11 @@ public enum GeminiLiveBackend {
             AppLogger.shared.log(.info, "Gemini Live dictation: fallback=yes reason=\(fallbackReason)")
         }
 
+        // Only reached unchecked without a session.
+        if presence == nil, await speechCheck(audioFile) == .silence {
+            AppLogger.shared.log(.info, "Gemini Live: no speech in the recording, skipping the batch fallback")
+            throw AppError.transcriptionEmpty
+        }
         let audioSeconds = (try? WavConcatenator.duration(ofWavAt: audioFile)) ?? 0
         AppLogger.shared.log(
             .warning,

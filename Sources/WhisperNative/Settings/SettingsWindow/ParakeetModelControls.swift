@@ -4,8 +4,9 @@ import WhisperNativeCore
 // MARK: - Parakeet model controls
 
 /// Parakeet's FluidAudio models as shared model rows (download with progress,
-/// delete when unused), plus the load state with a Load Now / Retry button
-/// once the speech model is on disk. Polls the backend and the model folders
+/// delete when unused), plus the load state once the speech model is on disk,
+/// with a Load Now button while Parakeet is the active engine and Retry after
+/// a failed load. Polls the backend and the model folders
 /// every second while visible. Renders bare rows with no `Section`, so callers
 /// wrap it (Settings > Parakeet and the onboarding engine step).
 struct ParakeetModelControls: View {
@@ -84,7 +85,10 @@ struct ParakeetModelControls: View {
                 Label(downloadedNotLoadedCaption, systemImage: "circle.dashed")
                     .foregroundStyle(.secondary)
                 Spacer()
-                loadButton("Load Now")
+                // Parakeet stays loaded only while it's the active engine.
+                if store.config.transcriptionEngine == .parakeet {
+                    loadButton("Load Now")
+                }
             }
         case .loading:
             HStack(spacing: DesignSystem.Spacing.sm) {

@@ -49,9 +49,7 @@ public final class AudioRecorder: AudioRecording {
         min(max(seconds, Constants.recordingTimeoutRange.lowerBound), Constants.recordingTimeoutRange.upperBound)
     }
 
-    public init() {
-        observeDefaultDeviceChanges()
-    }
+    public init() {}
 
     /// Lists microphones for the Settings picker. Goes through AVCaptureDevice, not the
     /// CoreAudio device list: while a voice-processing engine exists in this process,
@@ -141,7 +139,6 @@ public final class AudioRecorder: AudioRecording {
                     needsWarmup = false
                 } catch {
                     teardownCapture()
-                    discardPreparedVoiceEngine()
                     AppLogger.shared.log(.warning, "Voice processing unavailable, recording the unprocessed mic: \(error)")
                     try startCoreAudioCapture(wavWriter: writer, listenSink: nil)
                 }
@@ -219,56 +216,6 @@ public final class AudioRecorder: AudioRecording {
         recordingState = .listening
     }
 
-    /// Builds the voice-processing engine ahead of the next recording while
-    /// voice processing is on, and releases it while off. Enabling voice
-    /// processing takes ~0.5 s; a prepared engine starts in ~60 ms. Stopped, it
-    /// holds neither the mic nor the output, so nothing is ducked. Never
-    /// prompts for the mic.
-    public func prepareVoiceProcessing() {
-        guard voiceProcessingEnabled else {
-            discardPreparedVoiceEngine()
-            return
-        }
-        guard voiceEngine == nil, AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { return }
-        do {
-            let devices = try voiceEngineDevices()
-            guard preparedVoiceEngine?.devices != devices else { return }
-            discardPreparedVoiceEngine()
-            let setupStart = Date()
-            preparedVoiceEngine = PreparedVoiceEngine(engine: try makeVoiceEngine(inputDevice: devices.input), devices: devices)
-            AppLogger.shared.log(.info, "Voice processing engine prepared in \(Int(Date().timeIntervalSince(setupStart) * 1000)) ms")
-        } catch {
-            AppLogger.shared.log(.warning, "Voice processing engine not prepared: \(error)")
-        }
-    }
-
-    /// Rebuilds the prepared engine shortly after the system default input or
-    /// output changes (headphones connected or removed), so the next recording
-    /// doesn't pay the ~0.5 s rebuild. Waits for the route to settle first: one
-    /// Bluetooth switch fires several changes.
-    private func observeDefaultDeviceChanges() {
-        for selector in [kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDefaultInputDevice] {
-            var addr = AudioObjectPropertyAddress(
-                mSelector: selector,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr, DispatchQueue.main) { [weak self] _, _ in
-                MainActor.assumeIsolated {
-                    self?.scheduleVoiceEngineRebuild()
-                }
-            }
-        }
-    }
-
-    private func scheduleVoiceEngineRebuild() {
-        deviceChangeRebuildTask?.cancel()
-        deviceChangeRebuildTask = Task { [weak self] in
-            try await Task.sleep(nanoseconds: UInt64(Constants.voiceEngineRebuildDelay * 1_000_000_000))
-            self?.prepareVoiceProcessing()
-        }
-    }
-
     public func stopListening() {
         guard recordingState == .listening else { return }
         recordingState = .idle
@@ -294,24 +241,10 @@ public final class AudioRecorder: AudioRecording {
     // Shared with the IO proc via Unmanaged; access guarded by the audio thread.
     private var sharedContext: CaptureContext?
     // Voice-processed capture (startVoiceProcessedCapture); nil on the CoreAudio path.
+    // Exists only while recording: while any engine in this process has voice
+    // processing enabled, even stopped, macOS hands every other capture of the
+    // mic (other apps, and this app's own listening) raw audio ~100x quieter.
     private var voiceEngine: AVAudioEngine?
-    private var voiceEngineDevicesInUse: VoiceEngineDevices?
-    // Voice-processing engine kept configured and stopped between recordings,
-    // valid for the devices it was built on.
-    private var preparedVoiceEngine: PreparedVoiceEngine?
-    private var deviceChangeRebuildTask: Task<Void, Error>?
-
-    // The voice-processing unit captures the input and cancels echo against
-    // the output, so a change of either needs a new engine.
-    private struct VoiceEngineDevices: Equatable {
-        let input: AudioDeviceID
-        let output: AudioDeviceID
-    }
-
-    private struct PreparedVoiceEngine {
-        let engine: AVAudioEngine
-        let devices: VoiceEngineDevices
-    }
 
     // MARK: - CoreAudio setup
 
@@ -445,21 +378,9 @@ public final class AudioRecorder: AudioRecording {
     // so the caller falls back to the unprocessed CoreAudio capture.
     private func startVoiceProcessedCapture(wavWriter: WavWriter) throws {
         let setupStart = Date()
-        let devices = try voiceEngineDevices()
-        let deviceID = devices.input
-        let engine: AVAudioEngine
-        let wasPrepared: Bool
-        if let prepared = preparedVoiceEngine, prepared.devices == devices {
-            engine = prepared.engine
-            wasPrepared = true
-        } else {
-            discardPreparedVoiceEngine()
-            engine = try makeVoiceEngine(inputDevice: deviceID)
-            wasPrepared = false
-        }
-        preparedVoiceEngine = nil
+        let deviceID = try resolveInputDevice()
+        let engine = try makeVoiceEngine(inputDevice: deviceID)
         voiceEngine = engine
-        voiceEngineDevicesInUse = devices
         let inputNode = engine.inputNode
 
         let nodeFormat = inputNode.outputFormat(forBus: 0)
@@ -497,7 +418,7 @@ public final class AudioRecorder: AudioRecording {
         try engine.start()
 
         let setupMs = Int(Date().timeIntervalSince(setupStart) * 1000)
-        AppLogger.shared.log(.info, "Voice processing capture started in \(setupMs) ms (\(wasPrepared ? "prepared" : "new") engine), input device \(Self.voiceProcessingInputDevice(of: inputNode).map(String.init) ?? "unknown") (requested \(deviceID))")
+        AppLogger.shared.log(.info, "Voice processing capture started in \(setupMs) ms, input device \(Self.voiceProcessingInputDevice(of: inputNode).map(String.init) ?? "unknown") (requested \(deviceID))")
     }
 
     // A stopped engine with the voice-processing unit set up on `inputDevice`.
@@ -520,28 +441,6 @@ public final class AudioRecorder: AudioRecording {
             duckingLevel: .min
         )
         return engine
-    }
-
-    private func voiceEngineDevices() throws -> VoiceEngineDevices {
-        VoiceEngineDevices(input: try resolveInputDevice(), output: Self.defaultOutputDevice())
-    }
-
-    private static func defaultOutputDevice() -> AudioDeviceID {
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var deviceID = AudioDeviceID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID)
-        return deviceID
-    }
-
-    private func discardPreparedVoiceEngine() {
-        guard let prepared = preparedVoiceEngine else { return }
-        try? prepared.engine.inputNode.setVoiceProcessingEnabled(false)
-        preparedVoiceEngine = nil
     }
 
     // Built outside the main actor: the tap runs on an AVAudioEngine render
@@ -595,15 +494,8 @@ public final class AudioRecorder: AudioRecording {
         if let engine = voiceEngine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
-            // Kept for the next recording; prepareVoiceProcessing releases it
-            // once voice processing is off.
-            if voiceProcessingEnabled, let devices = voiceEngineDevicesInUse {
-                preparedVoiceEngine = PreparedVoiceEngine(engine: engine, devices: devices)
-            } else {
-                try? engine.inputNode.setVoiceProcessingEnabled(false)
-            }
+            try? engine.inputNode.setVoiceProcessingEnabled(false)
             voiceEngine = nil
-            voiceEngineDevicesInUse = nil
         }
 
         if audioDeviceID != kAudioObjectUnknown, let pid = ioProcID {

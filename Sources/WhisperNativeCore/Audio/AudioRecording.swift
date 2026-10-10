@@ -12,9 +12,6 @@ public protocol AudioRecording: AnyObject {
     /// grant already given: it never prompts.
     func startListening(onAudio: @escaping @Sendable (Data) -> Void) throws
     func stopListening()
-    /// Sets up voice processing ahead of the next recording while
-    /// `voiceProcessingEnabled`, and releases it otherwise. Never prompts.
-    func prepareVoiceProcessing()
     var isRecording: Bool { get }
     var isListening: Bool { get }
     var onRecordingFailed: (@Sendable (AppError) -> Void)? { get set }

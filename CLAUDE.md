@@ -97,6 +97,11 @@ Live from `Config.geminiStreaming`) and blocks Gemini without an API key.
   never in Config or logs. A key removed while Gemini is active keeps Gemini
   selected (no silent engine switch): dictations fail with
   `AppError.geminiAPIKeyMissing`.
+- Silent dictations never reach Gemini: `SpeechPresence` (Silero VAD over the
+  WAV, boosted so a quiet mic still counts) drops them as an empty transcript.
+  It runs before every batch dictation and, in Live, at stop only when the
+  session streamed no text (skipping the 5 s wait) or before the fallback.
+  Missing VAD model or any failure sends the clip. History reruns skip it.
 - Every call is billed: no exploratory or repeated API requests unless the change
   touches the request path; answer API questions from docs first.
 - Tests use stubs. Billed live tests run only with `GEMINI_BILLED_TESTS=1` + key
@@ -134,18 +139,21 @@ Live from `Config.geminiStreaming`) and blocks Gemini without an API key.
 - `AudioRecorder` captures through a CoreAudio IOProc (works with Continuity
   Camera mics). `pcmSink` feeds Gemini Live; the WAV gets every buffer.
 - Voice processing (`Config.voiceProcessing`, read at recording start): an
-  AVAudioEngine input node with voice processing on. Only channel 0 is converted
-  (the rest are reference channels); the mic is set after enabling. Setup failure
-  falls back to the raw mic. Enabling takes ~0.5 s, so the engine stays built and
-  stopped between recordings (`prepareVoiceProcessing`, keyed by input + output
-  device, rebuilt 1 s after a system default device change); stopped, it holds
-  no device and ducks nothing. While it exists, the
-  CoreAudio device list in this process gains its private aggregates and echo
-  inputs on output devices: the mic picker lists through `AVCaptureDevice`.
+  AVAudioEngine input node with voice processing on, built per recording
+  (~0.5-1 s on main before the start cue) and disabled at teardown. Only
+  channel 0 is converted (the rest are reference channels); the mic is set
+  after enabling. Setup failure falls back to the raw mic.
+- While any engine in the process has voice processing enabled (even
+  stopped), macOS switches the mic system-wide to raw capsules ~100x quieter
+  for every other capture, this app's listening included. So never keep one
+  around between recordings, and never enable it while a raw capture must keep
+  hearing. It also makes CoreAudio list private aggregates and echo inputs:
+  the mic picker lists through `AVCaptureDevice`.
 - Auto-start when you speak (`Config.startOnVoice`): the idle mic listens with a
   1.5 s pre-roll ring; `VoiceStartDetector` (streaming Silero VAD) feeds
-  `SpeechOnsetGate`. Listening stays unprocessed (ducking would last the whole
-  idle time, the gate is tuned on raw levels); `VoiceProcessingPolicy` decides.
+  `SpeechOnsetGate`. Never on together with voice processing:
+  `SettingsStore` applies `VoiceProcessingPolicy.resolveExclusive` on every
+  config change (the one just turned on wins).
 - Every path that flips `startOnVoice` ends in
   `Orchestrator.startOnVoiceSettingsChanged`; turning it off cancels a
   voice-started recording outright. `refreshVoiceStart` re-arms after every

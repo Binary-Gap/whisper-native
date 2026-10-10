@@ -20,26 +20,19 @@ struct RecordingTab: View {
                 .onAppear { refreshInputDevices() }
                 LabeledToggle(
                     "Voice processing",
-                    help: "Run the mic through macOS voice processing, the same one FaceTime uses: it suppresses background noise and evens out your volume (automatic gain), for every engine. Helps in noisy rooms or when you speak far from the mic.\n\nTrade-offs: while a recording runs, macOS slightly lowers other apps' audio (kept at the minimum it allows), opening the mic can take a moment longer, and the processing can soften quiet words. If it can't start on your mic, the recording uses the unprocessed mic.\n\nWith auto-start when you speak on, dictations your voice starts stay unprocessed (the mic listens unprocessed so nothing is lowered while idle); hotkey dictations are processed. Re-record the Whisper voice calibration sample after changing this, so it matches your dictations. A new value applies from the next recording.",
+                    help: "Run the mic through macOS voice processing, the same one FaceTime uses: it suppresses background noise and evens out your volume (automatic gain), for every engine. Helps in noisy rooms or when you speak far from the mic.\n\nTrade-offs: recordings take up to a second longer to start, and the processing can soften quiet words. While a recording runs, macOS slightly lowers other apps' audio (kept at the minimum it allows) and other apps using the same mic hear it much quieter. If it can't start on your mic, the recording uses the unprocessed mic.\n\nCan't be on together with auto-start when you speak: while voice processing runs, macOS gives every other listener of the mic a much quieter signal, so the listening would never hear you. Turning one on turns the other off. Re-record the Whisper voice calibration sample after changing this, so it matches your dictations. A new value applies from the next recording.",
                     isOn: $store.config.voiceProcessing
                 )
-                if let note = VoiceProcessingPolicy.startOnVoiceNote(
-                    voiceProcessing: store.config.voiceProcessing,
-                    startOnVoice: store.config.startOnVoice
-                ) {
-                    Text(note)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                ExclusiveTurnOffNote(store: store, setting: .voiceProcessing)
             }
 
             Section {
                 LabeledToggle(
                     "Auto-start when you speak",
-                    help: "Keep the mic listening and start recording as soon as you start talking (background noise is ignored). The dictation hotkey still ends the recording. The mic closes while the screen is locked. Turning it off during a recording your voice started cancels that recording (nothing is transcribed or pasted). Also toggled from the menu-bar menu or its shortcut (Settings > Hotkeys).\n\nUses the voice-detection model listed under Settings > Parakeet (downloads automatically the first time).",
+                    help: "Keep the mic listening and start recording as soon as you start talking (background noise is ignored). The dictation hotkey still ends the recording. The mic closes while the screen is locked. Turning it off during a recording your voice started cancels that recording (nothing is transcribed or pasted). Also toggled from the menu-bar menu or its shortcut (Settings > Hotkeys).\n\nCan't be on together with voice processing (above): turning one on turns the other off.\n\nUses the voice-detection model listed under Settings > Parakeet (downloads automatically the first time).",
                     isOn: $store.config.startOnVoice
                 )
+                ExclusiveTurnOffNote(store: store, setting: .startOnVoice)
                 LabeledToggle(
                     "Say a stop word to stop",
                     help: "End the recording by saying a stop word as your very last word, then pausing (by default \"over\", or \"câmbio\" in Portuguese). Only the last word counts, so \"talk it over tomorrow\" keeps recording. The word is left out of the text, and the auto-submit settings decide whether Enter follows. Works only with Parakeet and Gemini Live, the engines that transcribe while you talk.\n\nEdit the words in the `stop words` section of `words.yml` (Edit… button): `all` works in every language, a language's list only while dictating in it, and Auto detect uses every list.",
@@ -164,5 +157,21 @@ private struct StopWordsRow: View {
     private var summary: String {
         let words = wordsFile.fileState.stopWords.inlineDescription
         return words.isEmpty ? "None, the stop words section is empty" : words
+    }
+}
+
+/// Status line under voice processing or Start on voice after turning the
+/// other one on switched it off.
+private struct ExclusiveTurnOffNote: View {
+    @ObservedObject var store: SettingsStore
+    let setting: ExclusiveMicSetting
+
+    var body: some View {
+        if store.lastExclusiveTurnOff == setting {
+            Text(VoiceProcessingPolicy.turnedOffNote(setting))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

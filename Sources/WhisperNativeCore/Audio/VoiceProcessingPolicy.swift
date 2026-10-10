@@ -11,13 +11,17 @@ public enum RecordingCapture: Equatable, Sendable {
     case open(voiceProcessed: Bool)
 }
 
+/// One of the two settings that are never on together.
+public enum ExclusiveMicSetting: Equatable, Sendable {
+    case voiceProcessing
+    case startOnVoice
+}
+
 /// Decides when the mic runs through macOS voice processing
-/// (`Config.voiceProcessing`). Listening for Start on voice always uses the
-/// unprocessed mic: voice processing lowers other apps' audio for as long as
-/// it runs, which would last the whole idle time, and the speech onset gate
-/// is tuned on raw levels that automatic gain would keep moving. So a
-/// dictation that starts from voice keeps the unprocessed capture (with its
-/// pre-roll), while a hotkey press during listening reopens the mic processed.
+/// (`Config.voiceProcessing`). Voice processing and Start on voice are never
+/// on together: while voice processing is enabled in this process, macOS
+/// hands every other capture of the mic, Start on voice listening included,
+/// raw audio ~100x quieter, so speech would never be detected.
 public enum VoiceProcessingPolicy {
     public static func recordingCapture(
         voiceProcessing: Bool,
@@ -29,10 +33,28 @@ public enum VoiceProcessingPolicy {
         return .open(voiceProcessed: true)
     }
 
-    /// Visible note under the Voice processing toggle while both it and
-    /// Start on voice are on, nil otherwise.
-    public static func startOnVoiceNote(voiceProcessing: Bool, startOnVoice: Bool) -> String? {
-        guard voiceProcessing, startOnVoice else { return nil }
-        return "Dictations started by your voice use the unprocessed mic; hotkey dictations are processed."
+    /// `current` with at most one of voice processing and Start on voice on,
+    /// plus the setting turned off to get there. The one just turned on wins;
+    /// with both already on (a config saved by an older version), Start on
+    /// voice stays.
+    public static func resolveExclusive(previous: Config, current: Config) -> (config: Config, turnedOff: ExclusiveMicSetting?) {
+        guard current.voiceProcessing, current.startOnVoice else { return (current, nil) }
+        var resolved = current
+        if previous.voiceProcessing {
+            resolved.voiceProcessing = false
+            return (resolved, .voiceProcessing)
+        }
+        resolved.startOnVoice = false
+        return (resolved, .startOnVoice)
+    }
+
+    /// Visible status line under the setting `resolveExclusive` turned off.
+    public static func turnedOffNote(_ setting: ExclusiveMicSetting) -> String {
+        switch setting {
+        case .voiceProcessing:
+            return "Turned off because auto-start when you speak is on: the two can't run together."
+        case .startOnVoice:
+            return "Turned off because voice processing is on: the two can't run together."
+        }
     }
 }

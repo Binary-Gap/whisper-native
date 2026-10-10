@@ -271,15 +271,6 @@ final class Orchestrator {
         restartVoiceStart()
     }
 
-    /// Runs at launch and on every change of Voice processing or the input
-    /// device: builds the voice-processing engine ahead of the next hotkey
-    /// dictation, or releases it.
-    func voiceProcessingSettingsChanged() {
-        audioRecorder.preferredInputDeviceUID = store.config.inputDeviceUID
-        audioRecorder.voiceProcessingEnabled = store.config.voiceProcessing
-        audioRecorder.prepareVoiceProcessing()
-    }
-
     /// Closes the mic and re-arms with the current input device.
     func restartVoiceStart() {
         disarmVoiceStart()
@@ -442,6 +433,11 @@ final class Orchestrator {
         } catch is CancellationError {
             // Cancel key during a Gemini Live wait: the socket is closed, no fallback ran.
             AppLogger.shared.log(.info, "Transcription cancelled before the live transcript arrived")
+            recordHistoryEntry(audioURL: wavURL, text: "", language: store.config.selectedLanguage, durationSeconds: nil, status: .failed)
+            return
+        } catch AppError.transcriptionEmpty {
+            // Nothing was said: no alert, the recording stays rerunnable from History.
+            AppLogger.shared.log(.info, "Empty transcript: nothing to insert")
             recordHistoryEntry(audioURL: wavURL, text: "", language: store.config.selectedLanguage, durationSeconds: nil, status: .failed)
             return
         } catch {
@@ -630,6 +626,10 @@ final class Orchestrator {
         case .parakeet:
             return try await parakeetBackend.transcribe(audioFile: recordingURL, config: config)
         case .gemini:
+            // Billed per call: a silent clip is dropped here instead of sent.
+            if await SpeechPresence.check(audioFile: recordingURL) == .silence {
+                throw AppError.transcriptionEmpty
+            }
             return try await geminiBackend.transcribe(audioFile: recordingURL, config: config)
         case .geminiLive:
             return try await GeminiLiveBackend.transcribe(
