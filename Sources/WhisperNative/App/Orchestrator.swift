@@ -53,8 +53,9 @@ final class Orchestrator {
     // decide whether to auto-paste or just copy to clipboard on completion.
     private var recordingFocusedBundleID: String?
 
-    // iTerm2 session ID captured at recording start, if recording started in iTerm2.
-    private var recordingItermSessionID: String?
+    // Lookup of the iTerm2 session focused at recording start, if recording started
+    // in iTerm2. Runs alongside the mic start; awaited only when inserting.
+    private var recordingItermSessionLookup: Task<String?, Never>?
 
     // Set when the cancel key is pressed once during a terminal-targeted recording
     // with auto-submit enabled: suppresses the Enter keypress for that one
@@ -270,6 +271,15 @@ final class Orchestrator {
         restartVoiceStart()
     }
 
+    /// Runs at launch and on every change of Voice processing or the input
+    /// device: builds the voice-processing engine ahead of the next hotkey
+    /// dictation, or releases it.
+    func voiceProcessingSettingsChanged() {
+        audioRecorder.preferredInputDeviceUID = store.config.inputDeviceUID
+        audioRecorder.voiceProcessingEnabled = store.config.voiceProcessing
+        audioRecorder.prepareVoiceProcessing()
+    }
+
     /// Closes the mic and re-arms with the current input device.
     func restartVoiceStart() {
         disarmVoiceStart()
@@ -335,12 +345,12 @@ final class Orchestrator {
 
         // Capture frontmost app for post-transcription paste decision.
         recordingFocusedBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        recordingItermSessionID = nil
+        recordingItermSessionLookup = nil
         suppressAutoSubmitForCurrentRecording = false
         cancelPressCount = 0
         transcriptionCancelled = false
         if recordingFocusedBundleID == ItermBridge.bundleIdentifier {
-            recordingItermSessionID = await Task.detached { ItermBridge.currentSessionID() }.value
+            recordingItermSessionLookup = Task.detached { ItermBridge.currentSessionID() }
         }
 
         // Generate a millisecond-timestamped WAV path in the persistent history
@@ -470,9 +480,10 @@ final class Orchestrator {
             ? Constants.wrapWithAudioTags(transcriptText)
             : transcriptText
 
+        let itermSessionID = await recordingItermSessionLookup?.value
         let plan = InsertionPlan.make(
             config: store.config,
-            itermSessionID: recordingItermSessionID,
+            itermSessionID: itermSessionID,
             sameApp: sameApp,
             autoSubmitSuppressed: suppressAutoSubmitForCurrentRecording
         )
