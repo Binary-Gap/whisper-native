@@ -132,6 +132,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 orchestrator?.handleRecordingFailed(error)
             }
         }
+        audioRecorder.onRecordingTimedOut = { [weak orchestrator] audioURL in
+            Task { @MainActor in
+                orchestrator?.handleRecordingTimedOut(audioURL: audioURL)
+            }
+        }
 
         // Attach the indicator to the recorder so timeout can set recordingTimedOut.
         audioRecorder.indicator = recordingIndicator
@@ -231,6 +236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the key passes through to focused apps when nothing is in flight.
         orchestrator.onActiveStateChanged = { [weak self] active in
             self?.hotkeyManager.setCancelHotkeyEnabled(active)
+        }
+        orchestrator.onShowHistory = { [weak self] in
+            self?.historyWindowController.show()
         }
 
         // The hotkey manager polls for the Accessibility grant and self-heals the

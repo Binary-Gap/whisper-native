@@ -7,7 +7,8 @@ import Foundation
 ///
 /// Keeps the newest `maxItems` entries as a usage log (text and metadata are
 /// small); only the newest `maxAudioFiles` of them keep their WAV, so the
-/// history dir stays bounded.
+/// history dir stays bounded. A pending entry keeps its WAV regardless: it is
+/// the only copy of a recording not transcribed yet.
 /// File deletions are best-effort (a locked/missing file never aborts a mutation).
 @MainActor
 public final class TranscriptionHistoryStore: ObservableObject {
@@ -91,7 +92,7 @@ public final class TranscriptionHistoryStore: ObservableObject {
     private func deleteAgedOutAudioFiles() {
         guard entries.count > maxAudioFiles else { return }
         for entry in entries[maxAudioFiles...]
-        where FileManager.default.fileExists(atPath: entry.audioFilePath.path) {
+        where entry.status != .pending && FileManager.default.fileExists(atPath: entry.audioFilePath.path) {
             deleteAudioFile(entry)
         }
     }

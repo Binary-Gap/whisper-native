@@ -360,7 +360,21 @@ private struct HistoryRow: View {
 
     @ViewBuilder
     private var transcript: some View {
-        if entry.text.isEmpty {
+        if entry.status == .pending {
+            // Stopped at the length limit before transcription: the transcribe
+            // action stays in view instead of behind the hover menu.
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                Text("Not transcribed yet")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .italic()
+                Button(isRerunning ? "Transcribing…" : "Transcribe") {
+                    Task { await viewModel.rerun(entry, store: store, historyStore: historyStore) }
+                }
+                .controlSize(.small)
+                .disabled(!audioExists || isRerunning)
+            }
+        } else if entry.text.isEmpty {
             Text(entry.status == .failed ? "Transcription failed" : "No text")
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -386,6 +400,10 @@ private struct HistoryRow: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .symbolRenderingMode(.hierarchical)
+                    .font(.caption2)
+            } else if entry.status == .pending {
+                Image(systemName: "hourglass")
+                    .foregroundStyle(.secondary)
                     .font(.caption2)
             }
             Text(metadataText)

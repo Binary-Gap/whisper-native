@@ -142,7 +142,10 @@ Live from `Config.geminiStreaming`) and blocks Gemini without an API key.
   AVAudioEngine input node with voice processing on, built per recording
   (~0.5-1 s on main before the start cue) and disabled at teardown. Only
   channel 0 is converted (the rest are reference channels); the mic is set
-  after enabling. Setup failure falls back to the raw mic.
+  after enabling. Setup failure falls back to the raw mic, and so does a
+  started unit that records nothing within 1 s (macOS's voice-processing unit
+  can get stuck system-wide): the start cue waits for that first audio
+  (`FirstAudioWait`), so the fallback loses no speech.
 - While any engine in the process has voice processing enabled (even
   stopped), macOS switches the mic system-wide to raw capsules ~100x quieter
   for every other capture, this app's listening included. So never keep one
@@ -183,7 +186,9 @@ Live from `Config.geminiStreaming`) and blocks Gemini without an API key.
 ## History
 `TranscriptionHistoryStore` keeps the newest 5000 dictations in
 `history/history.json` (usage log for debugging and model comparisons); only the
-newest 50 keep their WAV.
+newest 50 keep their WAV. A recording stopped at its length limit is saved as
+a pending entry (no transcript, transcribed from History on request) whose WAV
+the cap never deletes.
 
 ## Models
 - Default dir `~/Library/Application Support/whisper-native/models/`.

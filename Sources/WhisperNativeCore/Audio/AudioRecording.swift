@@ -15,6 +15,8 @@ public protocol AudioRecording: AnyObject {
     var isRecording: Bool { get }
     var isListening: Bool { get }
     var onRecordingFailed: (@Sendable (AppError) -> Void)? { get set }
+    /// Fired with the finalized WAV when a recording stops at its length limit.
+    var onRecordingTimedOut: (@Sendable (URL) -> Void)? { get set }
     var pcmSink: (@Sendable (Data) -> Void)? { get set }
     var preferredInputDeviceUID: String? { get set }
     var voiceProcessingEnabled: Bool { get set }

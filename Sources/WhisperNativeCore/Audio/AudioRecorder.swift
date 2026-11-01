@@ -7,7 +7,8 @@ import Foundation
 // Default path: CoreAudio AudioDeviceIOProc (works with Continuity Camera mics where
 // AVAudioEngine fails). With voice processing on, an AVAudioEngine input node in
 // voice-processing mode captures instead (see VoiceProcessingPolicy for when), falling
-// back to the CoreAudio path when it fails to start.
+// back to the CoreAudio path when it fails to start or records no audio within
+// Constants.voiceProcessingFirstAudioTimeout.
 @MainActor
 public final class AudioRecorder: AudioRecording {
 
@@ -15,6 +16,8 @@ public final class AudioRecorder: AudioRecording {
 
     public var isRecording: Bool { recordingState == .recording }
     public var onRecordingFailed: (@Sendable (AppError) -> Void)?
+    // Fired with the finalized WAV when a recording stops at its length limit.
+    public var onRecordingTimedOut: (@Sendable (URL) -> Void)?
 
     // Callback fired on the main thread with linear audio level in 0.0–1.0 range.
     // Stored as a plain Sendable closure (not @MainActor-typed): the audio IO thread must
@@ -34,7 +37,7 @@ public final class AudioRecorder: AudioRecording {
     public var voiceProcessingEnabled: Bool = false
 
     // Whether to play start/stop cue sounds (Config.soundFeedback).
-    public var soundFeedbackEnabled: Bool = true
+    public var soundFeedbackEnabled: Bool = false
 
     // Playback volume for cue sounds, 0.0–1.0 (Config.soundVolume).
     public var soundVolume: Float = 0.5
@@ -135,12 +138,19 @@ public final class AudioRecorder: AudioRecording {
             if voiceProcessed {
                 do {
                     try startVoiceProcessedCapture(wavWriter: writer)
-                    // Automatic gain sets the level: the cue plays as soon as it runs.
-                    needsWarmup = false
                 } catch {
                     teardownCapture()
                     AppLogger.shared.log(.warning, "Voice processing unavailable, recording the unprocessed mic: \(error)")
                     try startCoreAudioCapture(wavWriter: writer, listenSink: nil)
+                }
+                if voiceEngine != nil {
+                    // Automatic gain sets the level: the cue plays once audio flows.
+                    needsWarmup = false
+                    if !(await voiceProcessedAudioArrived()) {
+                        teardownCapture()
+                        try startCoreAudioCapture(wavWriter: writer, listenSink: nil)
+                        needsWarmup = true
+                    }
                 }
             } else {
                 try startCoreAudioCapture(wavWriter: writer, listenSink: nil)
@@ -163,25 +173,35 @@ public final class AudioRecorder: AudioRecording {
             try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
             await MainActor.run {
                 guard let self, self.isRecording else { return }
-                self.recordingState = .idle
-                self.teardownCapture()
+                self.timeoutTask = nil
                 self.indicator?.recordingTimedOut = true
-                let error = AppError.recordingFailed("Recording timed out after \(Int(timeout))s")
-                self.onRecordingFailed?(error)
-                AppLogger.shared.log(.warning, "Recording timed out")
+                AppLogger.shared.log(.warning, "Recording reached its \(Int(timeout))s limit, keeping the audio")
+                do {
+                    self.onRecordingTimedOut?(try self.finishRecording())
+                } catch {
+                    self.onRecordingFailed?(error as? AppError ?? .recordingFailed("\(error)"))
+                }
             }
         }
     }
 
     public func stopRecording() async throws -> URL {
-        guard recordingState == .recording, let url = outputURL else {
+        guard recordingState == .recording else {
             throw AppError.recordingFailed("Not recording")
         }
 
         timeoutTask?.cancel()
         timeoutTask = nil
-        recordingState = .idle
+        return try finishRecording()
+    }
 
+    // Stops the capture and finalizes the WAV: the manual stop and the length
+    // limit both end here.
+    private func finishRecording() throws -> URL {
+        guard let url = outputURL else {
+            throw AppError.recordingFailed("Not recording")
+        }
+        recordingState = .idle
         teardownCapture()
 
         guard let writer = wavWriter else {
@@ -421,6 +441,23 @@ public final class AudioRecorder: AudioRecording {
         AppLogger.shared.log(.info, "Voice processing capture started in \(setupMs) ms, input device \(Self.voiceProcessingInputDevice(of: inputNode).map(String.init) ?? "unknown") (requested \(deviceID))")
     }
 
+    // Holds the start cue until the voice-processed capture records its first
+    // audio. It can start cleanly and never deliver any (macOS's voice-processing
+    // unit stuck system-wide); false means it didn't within the timeout, logged
+    // as a warning. The WAV is still empty then and the user hasn't been cued,
+    // so falling back loses no speech.
+    private func voiceProcessedAudioArrived() async -> Bool {
+        guard let context = sharedContext else { return false }
+        let timeout = Constants.voiceProcessingFirstAudioTimeout
+        if let elapsed = await FirstAudioWait.wait(timeout: timeout, hasAudio: { context.deliveryCounts.recordedBytes > 0 }) {
+            AppLogger.shared.log(.info, "Voice processing first audio after \(elapsed.milliseconds) ms")
+            return true
+        }
+        let counts = context.deliveryCounts
+        AppLogger.shared.log(.warning, "Voice processing delivered no audio within \(timeout.milliseconds) ms (\(counts.inputBuffers) buffers in, \(counts.recordedBytes) bytes recorded), recording the unprocessed mic instead")
+        return false
+    }
+
     // A stopped engine with the voice-processing unit set up on `inputDevice`.
     private func makeVoiceEngine(inputDevice: AudioDeviceID) throws -> AVAudioEngine {
         let engine = AVAudioEngine()
@@ -611,6 +648,10 @@ final class CaptureContext: @unchecked Sendable {
     private var listenSink: (@Sendable (Data) -> Void)?
     private var preRoll = Data()
     private static let preRollCapacityBytes = Int(Constants.voiceStartPreRoll * 16_000) * 2
+    // Buffers handed to processAudio and bytes routed to the WAV, under
+    // routingLock: they tell a capture that started but delivers nothing apart.
+    private var inputBufferCount = 0
+    private var recordedByteCount = 0
 
     // Conversion output scratch buffer (reused across calls).
     private var conversionBuffer = [Int16](repeating: 0, count: 4096)
@@ -651,7 +692,17 @@ final class CaptureContext: @unchecked Sendable {
         self.pcmSink = pcmSink
     }
 
+    var deliveryCounts: (inputBuffers: Int, recordedBytes: Int) {
+        routingLock.lock()
+        defer { routingLock.unlock() }
+        return (inputBufferCount, recordedByteCount)
+    }
+
     func processAudio(inputBuffer: UnsafePointer<AudioBufferList>) {
+        routingLock.lock()
+        inputBufferCount += 1
+        routingLock.unlock()
+
         let abl = inputBuffer.pointee
         guard abl.mNumberBuffers > 0 else { return }
 
@@ -743,6 +794,8 @@ final class CaptureContext: @unchecked Sendable {
             if preRoll.count > Self.preRollCapacityBytes {
                 preRoll.removeFirst(preRoll.count - Self.preRollCapacityBytes)
             }
+        } else {
+            recordedByteCount += outputData.count
         }
         routingLock.unlock()
 

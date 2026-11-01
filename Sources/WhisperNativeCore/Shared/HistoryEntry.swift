@@ -8,6 +8,17 @@ public struct HistoryEntry: Codable, Identifiable, Sendable {
     public enum Status: String, Codable, Sendable {
         case success
         case failed
+        /// Recorded but never transcribed (the recording hit its length limit):
+        /// the History view offers to transcribe it, and its WAV is kept past
+        /// the newest-files cap until then.
+        case pending
+
+        /// An unknown status (written by a newer build) reads as failed, so one
+        /// entry never breaks decoding the whole history.
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Status(rawValue: raw) ?? .failed
+        }
     }
 
     public let id: UUID
@@ -16,7 +27,7 @@ public struct HistoryEntry: Codable, Identifiable, Sendable {
     /// the entry ages out of the newest `Constants.maxHistoryAudioFiles` (the
     /// view greys out Play/Reveal/Rerun).
     public var audioFilePath: URL
-    /// Empty string when the run failed or was not yet transcribed.
+    /// Empty string when the run failed or is pending.
     public var text: String
     /// Language actually used for the run.
     public var language: Language

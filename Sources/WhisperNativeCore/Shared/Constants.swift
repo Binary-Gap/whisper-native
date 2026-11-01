@@ -110,6 +110,11 @@ public enum Constants {
     // word isn't recorded into the low-level warmup ramp.
     public static let micWarmupDelay: TimeInterval = 0.25
 
+    // How long a started voice-processing capture gets to deliver its first
+    // recorded audio before the recording switches to the unprocessed mic.
+    // Counted once the engine has started, so the 0.6-1.6 s setup isn't in it.
+    public static let voiceProcessingFirstAudioTimeout: Duration = .seconds(1)
+
     // Start on voice: seconds of listened audio kept ahead of the detection and
     // written at the head of the recording. Detection lands ~0.5-0.8 s after
     // the first syllable, so this keeps the opening word plus a little silence.

@@ -227,7 +227,7 @@ public struct Config: Codable, Sendable {
         inputDeviceUID: String? = nil,
         voiceProcessing: Bool = true,
         autoPasteWhenSameApp: Bool = true,
-        soundFeedback: Bool = true,
+        soundFeedback: Bool = false,
         soundVolume: Float = 0.5,
         pauseMusicWhileRecording: Bool = false,
         startOnVoice: Bool = false,

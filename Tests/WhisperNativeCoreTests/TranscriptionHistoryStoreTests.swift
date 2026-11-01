@@ -97,4 +97,34 @@ final class TranscriptionHistoryStoreTests: XCTestCase {
         let reloaded = TranscriptionHistoryStore(metadataURL: metadataURL)
         XCTAssertEqual(reloaded.entries.first?.estimatedCostUSD, 0.0012)
     }
+
+    // A recording stopped at its length limit is the only copy of that audio
+    // until transcribed, so the newest-files cap never deletes it.
+    func testPendingEntryKeepsItsAudioPastTheCap() throws {
+        let metadataURL = directory.appendingPathComponent("history.json")
+        let store = TranscriptionHistoryStore(metadataURL: metadataURL, maxAudioFiles: 1)
+        var pending = try makeEntry("pending")
+        pending.status = .pending
+        pending.text = ""
+        let finished = try makeEntry("finished")
+        store.add(finished)
+        store.add(pending)
+        store.add(try makeEntry("newest"))
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pending.audioFilePath.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: finished.audioFilePath.path))
+        let reloaded = TranscriptionHistoryStore(metadataURL: metadataURL, maxAudioFiles: 1)
+        XCTAssertEqual(reloaded.entries.map(\.status), [.success, .pending, .success])
+    }
+
+    func testUnknownStatusDecodesAsFailed() throws {
+        let metadataURL = directory.appendingPathComponent("history.json")
+        let json = #"""
+        [{"audioFilePath":"file:///missing.wav","id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","language":"pt",
+          "modelName":"model","status":"queued","text":"","timestamp":"2026-09-25T20:18:28Z"}]
+        """#
+        try Data(json.utf8).write(to: metadataURL)
+        let store = TranscriptionHistoryStore(metadataURL: metadataURL)
+        XCTAssertEqual(store.entries.first?.status, .failed)
+    }
 }

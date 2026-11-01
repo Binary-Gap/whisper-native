@@ -45,6 +45,9 @@ final class Orchestrator {
     // recording/transcription is in flight.
     var onActiveStateChanged: (@MainActor (Bool) -> Void)?
 
+    // Opens the History window (wired by AppDelegate).
+    var onShowHistory: (@MainActor () -> Void)?
+
     // Tracks the last-notified active state so didSet observers only fire the
     // callback on an actual transition.
     private var lastNotifiedActive = false
@@ -227,6 +230,30 @@ final class Orchestrator {
         AppLogger.shared.log(.error, "Recording failed: \(error)")
         showAlert(title: "Recording failed", message: error.localizedDescription)
         refreshVoiceStart()
+    }
+
+    /// Called when a recording stops at its length limit: the WAV is kept as a
+    /// pending History entry, transcribed only when the user asks from History.
+    func handleRecordingTimedOut(audioURL: URL) {
+        isRecording = false
+        indicator.hide()
+        stopLivePreview()
+        audioRecorder.pcmSink = nil
+        musicPauser.resume()
+        cancelGeminiLiveSession()
+        recordHistoryEntry(audioURL: audioURL, text: "", language: store.config.selectedLanguage, durationSeconds: nil, status: .pending)
+        refreshVoiceStart()
+
+        let limit = RecordingTimeoutFormat.label(seconds: store.config.recordingTimeoutSeconds)
+        let alert = NSAlert()
+        alert.messageText = "Recording stopped at the \(limit) limit"
+        alert.informativeText = "The audio is saved in History, not transcribed. Transcribe it from there."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open History")
+        alert.addButton(withTitle: "OK")
+        if alert.runModal() == .alertFirstButtonReturn {
+            onShowHistory?()
+        }
     }
 
     // MARK: - Start on voice
