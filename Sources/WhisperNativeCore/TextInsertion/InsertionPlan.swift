@@ -2,21 +2,35 @@ import Foundation
 
 /// Where a finished transcript goes, decided from the Output settings and the
 /// focus captured at recording start. "Copy to clipboard"
-/// (`autoPasteWhenSameApp` off) inserts nothing anywhere, iTerm2 included, so
-/// neither auto-submit can fire.
+/// (`autoPasteWhenSameApp` off) inserts nothing anywhere, iTerm2 and Buildpick
+/// included, so no auto-submit can fire.
 public struct InsertionPlan: Equatable, Sendable {
     /// iTerm2 session to send the text to first; nil skips the bridge.
     public var itermSessionID: String?
     /// Enter after the text in the iTerm2 session.
     public var submitInTerminal: Bool
-    /// Cmd+V into the focused app when the bridge is skipped or fails.
+    /// Buildpick session to send the text to first; nil skips the bridge.
+    public var buildpickSessionID: String?
+    /// Send the text as a prompt in the Buildpick session; false leaves it
+    /// unsent in that session's compose box.
+    public var submitInBuildpick: Bool
+    /// Cmd+V into the focused app when the bridges are skipped or fail.
     public var pasteIntoFocusedApp: Bool
     /// Return after the Cmd+V paste.
     public var submitAfterPaste: Bool
 
-    public init(itermSessionID: String?, submitInTerminal: Bool, pasteIntoFocusedApp: Bool, submitAfterPaste: Bool) {
+    public init(
+        itermSessionID: String?,
+        submitInTerminal: Bool,
+        buildpickSessionID: String? = nil,
+        submitInBuildpick: Bool = false,
+        pasteIntoFocusedApp: Bool,
+        submitAfterPaste: Bool
+    ) {
         self.itermSessionID = itermSessionID
         self.submitInTerminal = submitInTerminal
+        self.buildpickSessionID = buildpickSessionID
+        self.submitInBuildpick = submitInBuildpick
         self.pasteIntoFocusedApp = pasteIntoFocusedApp
         self.submitAfterPaste = submitAfterPaste
     }
@@ -49,10 +63,13 @@ public struct InsertionPlan: Equatable, Sendable {
     }
 
     /// `sameApp`: the app focused at recording start is still frontmost.
+    /// `buildpickSessionID`: the Buildpick session focused at recording start;
+    /// it follows the "other apps" auto-submit setting.
     /// `autoSubmitSuppressed`: Esc was pressed during the recording.
     public static func make(
         config: Config,
         itermSessionID: String?,
+        buildpickSessionID: String? = nil,
         sameApp: Bool,
         autoSubmitSuppressed: Bool
     ) -> InsertionPlan {
@@ -62,6 +79,8 @@ public struct InsertionPlan: Equatable, Sendable {
         return InsertionPlan(
             itermSessionID: itermSessionID,
             submitInTerminal: itermSessionID != nil && config.autoSubmitInTerminal && !autoSubmitSuppressed,
+            buildpickSessionID: buildpickSessionID,
+            submitInBuildpick: buildpickSessionID != nil && config.autoSubmitInOtherApps && !autoSubmitSuppressed,
             pasteIntoFocusedApp: sameApp,
             submitAfterPaste: sameApp && config.autoSubmitInOtherApps && !autoSubmitSuppressed
         )

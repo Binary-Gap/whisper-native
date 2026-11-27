@@ -57,6 +57,35 @@ final class InsertionPlanTests: XCTestCase {
         XCTAssertFalse(plan.submitAfterPaste)
     }
 
+    func testBuildpickSessionSubmitsWithOtherAppsAutoSubmit() {
+        let plan = InsertionPlan.make(config: config(autoPaste: true), itermSessionID: nil, buildpickSessionID: "s1", sameApp: false, autoSubmitSuppressed: false)
+        XCTAssertEqual(plan.buildpickSessionID, "s1")
+        XCTAssertTrue(plan.submitInBuildpick)
+        XCTAssertFalse(plan.pasteIntoFocusedApp)
+    }
+
+    func testBuildpickEscLeavesTextAsDraft() {
+        let plan = InsertionPlan.make(config: config(autoPaste: true), itermSessionID: nil, buildpickSessionID: "s1", sameApp: true, autoSubmitSuppressed: true)
+        XCTAssertEqual(plan.buildpickSessionID, "s1")
+        XCTAssertFalse(plan.submitInBuildpick)
+        XCTAssertTrue(plan.pasteIntoFocusedApp)
+        XCTAssertFalse(plan.submitAfterPaste)
+    }
+
+    func testBuildpickAutoSubmitOffLeavesTextAsDraft() {
+        let plan = InsertionPlan.make(
+            config: config(autoPaste: true, submitInTerminal: true, submitInOtherApps: false),
+            itermSessionID: nil, buildpickSessionID: "s1", sameApp: true, autoSubmitSuppressed: false
+        )
+        XCTAssertEqual(plan.buildpickSessionID, "s1")
+        XCTAssertFalse(plan.submitInBuildpick)
+    }
+
+    func testClipboardOnlySkipsBuildpickSession() {
+        let plan = InsertionPlan.make(config: config(autoPaste: false), itermSessionID: nil, buildpickSessionID: "s1", sameApp: true, autoSubmitSuppressed: false)
+        XCTAssertEqual(plan, clipboardOnly)
+    }
+
     func testPasteNeedsAccessibilityOnlyWhileAutoPasting() {
         XCTAssertTrue(InsertionPlan.pasteNeedsAccessibility(autoPasteWhenSameApp: true, accessibilityGranted: false))
         XCTAssertFalse(InsertionPlan.pasteNeedsAccessibility(autoPasteWhenSameApp: true, accessibilityGranted: true))

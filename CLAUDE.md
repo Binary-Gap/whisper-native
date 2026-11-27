@@ -177,6 +177,11 @@ Live from `Config.geminiStreaming`) and blocks Gemini without an API key.
   and is awaited only at insertion: never put it back on the start path.
 - `Resources/iterm/iterm_helper.py` types the text; with a shell or ssh
   foreground job it joins lines with spaces, else each newline runs a command.
+- Buildpick (`BuildpickBridge`): a recording started in a Buildpick Mac app looks up
+  its focused session alongside the mic start (`cc-remote focused`, Buildpick's
+  server binary) and delivers there at insertion: `send` when other-apps
+  auto-submit applies, else `draft` (compose box, unsent). Any failure falls
+  back to Cmd+V.
 
 ## Hotkeys and language
 - KeyboardShortcuts SPM, user-customizable, persisted by the package.
@@ -201,7 +206,8 @@ the cap never deletes.
 
 ### whisper.cpp build + bundling
 - Never checked in: `whisper:fetch` clones the pinned `WHISPER_CPP_TAG`
-  (mise.toml) into `external/whisper.cpp/`; `whisper:build` builds it and runs
+  (mise.toml) into `external/whisper.cpp/`; it applies `patches/whisper.cpp/*.patch`
+  and re-clones when the tag or a patch changes; `whisper:build` builds it and runs
   `scripts/stage-whisper-server.sh`. `generate` depends on it, since xcodegen
   lists the staged dylibs.
 - whisper-server links `libwhisper` + `libggml*` dylibs via `@rpath`: the staging

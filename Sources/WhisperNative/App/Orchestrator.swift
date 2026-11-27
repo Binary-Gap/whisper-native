@@ -60,6 +60,10 @@ final class Orchestrator {
     // in iTerm2. Runs alongside the mic start; awaited only when inserting.
     private var recordingItermSessionLookup: Task<String?, Never>?
 
+    // Same for the Buildpick session focused at recording start, if recording
+    // started in a Buildpick Mac app.
+    private var recordingBuildpickSessionLookup: Task<String?, Never>?
+
     // Set when the cancel key is pressed once during a terminal-targeted recording
     // with auto-submit enabled: suppresses the Enter keypress for that one
     // transcription instead of cancelling the recording outright.
@@ -364,11 +368,14 @@ final class Orchestrator {
         // Capture frontmost app for post-transcription paste decision.
         recordingFocusedBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         recordingItermSessionLookup = nil
+        recordingBuildpickSessionLookup = nil
         suppressAutoSubmitForCurrentRecording = false
         cancelPressCount = 0
         transcriptionCancelled = false
         if recordingFocusedBundleID == ItermBridge.bundleIdentifier {
             recordingItermSessionLookup = Task.detached { ItermBridge.currentSessionID() }
+        } else if let bundleID = recordingFocusedBundleID, BuildpickBridge.bundleIdentifiers.contains(bundleID) {
+            recordingBuildpickSessionLookup = Task.detached { BuildpickBridge.installed.focusedSessionID() }
         }
 
         // Generate a millisecond-timestamped WAV path in the persistent history
@@ -504,15 +511,20 @@ final class Orchestrator {
             : transcriptText
 
         let itermSessionID = await recordingItermSessionLookup?.value
+        let buildpickSessionID = await recordingBuildpickSessionLookup?.value
         let plan = InsertionPlan.make(
             config: store.config,
             itermSessionID: itermSessionID,
+            buildpickSessionID: buildpickSessionID,
             sameApp: sameApp,
             autoSubmitSuppressed: suppressAutoSubmitForCurrentRecording
         )
         if let sessionID = plan.itermSessionID,
            await ItermBridge.sendText(outgoingText, toSession: sessionID, submitWithEnter: plan.submitInTerminal) {
             AppLogger.shared.log(.info, "Transcript sent to iTerm2 session \(sessionID)")
+            playFeedbackSound(named: "Purr")
+        } else if let sessionID = plan.buildpickSessionID,
+                  await buildpickDeliver(outgoingText, toSession: sessionID, submit: plan.submitInBuildpick) {
             playFeedbackSound(named: "Purr")
         } else if plan.pasteIntoFocusedApp {
             do {
@@ -538,6 +550,19 @@ final class Orchestrator {
             textInserter.copyToClipboard(outgoingText)
             sendUserNotification(body: "Transcript ready — use Shift+Cmd+V to paste.")
         }
+    }
+
+    /// Sends the transcript to the Buildpick session as a prompt, or leaves it
+    /// unsent in that session's compose box. False sends the caller to paste.
+    private func buildpickDeliver(_ text: String, toSession sessionID: String, submit: Bool) async -> Bool {
+        let bridge = BuildpickBridge.installed
+        let delivered = submit
+            ? await bridge.send(text, toSession: sessionID)
+            : await bridge.draft(text, toSession: sessionID)
+        if delivered {
+            AppLogger.shared.log(.info, "Transcript \(submit ? "sent" : "drafted") to Buildpick session \(sessionID)")
+        }
+        return delivered
     }
 
     // MARK: - Live preview

@@ -4,7 +4,7 @@ options:
   bundleIdPrefix: io.binarygap.whisper-native
   deploymentTarget:
     macOS: "26.0"
-  projectFormat: xcode26_0
+  projectFormat: xcode26_3
   usesTabs: false
   xcodeVersion: "26.0"
 

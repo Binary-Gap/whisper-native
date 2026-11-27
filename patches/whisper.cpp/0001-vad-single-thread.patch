@@ -1,0 +1,14 @@
+diff --git a/src/whisper.cpp b/src/whisper.cpp
+index 0336bf7..ceada3b 100644
+--- a/src/whisper.cpp
++++ b/src/whisper.cpp
+@@ -6835,6 +6835,9 @@ static bool whisper_vad(
+ 
+     if (state->vad_context == nullptr) {
+         struct whisper_vad_context_params vad_ctx_params = whisper_vad_default_context_params();
++        // Silero runs one small graph per 32 ms chunk: with several threads every chunk
++        // waits on a thread barrier, which takes seconds per dictation when the CPU is busy.
++        vad_ctx_params.n_threads = 1;
+         struct whisper_vad_context * vctx = whisper_vad_init_from_file_with_params(params.vad_model_path, vad_ctx_params);
+         if (vctx == nullptr) {
+             WHISPER_LOG_ERROR("%s: failed to initialize VAD context\n", __func__);

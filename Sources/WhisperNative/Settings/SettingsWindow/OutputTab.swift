@@ -34,7 +34,7 @@ struct OutputTab: View {
                 )
                 LabeledToggle(
                     "Auto-submit in other apps",
-                    help: "Presses Enter after auto-pasting a transcript into any other app (chat inputs, browsers). Pressing \(cancelKeyName) once during a recording skips it.",
+                    help: "Presses Enter after auto-pasting a transcript into any other app (chat inputs, browsers). A recording started in Buildpick goes to the session that was in front, sent with this on, left unsent in its compose box with it off. Pressing \(cancelKeyName) once during a recording skips it.",
                     unavailableReason: autoSubmitUnavailableReason,
                     isOn: $store.config.autoSubmitInOtherApps
                 )

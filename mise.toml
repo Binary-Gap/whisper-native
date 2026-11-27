@@ -12,7 +12,7 @@ APPLE_TEAM_ID = ""
 DEBUG_SIGN_IDENTITY = "-"
 
 # Pinned whisper.cpp release. Bump here to upgrade the bundled server binary.
-WHISPER_CPP_TAG = "v1.9.1"
+WHISPER_CPP_TAG = "v1.9.6"
 
 # NOTE: setting `includes` REPLACES mise's default file-task dirs.
 # Pulls in the signing/notarization/release tasks (fastlane/ is gitignored).
@@ -22,28 +22,37 @@ WHISPER_CPP_TAG = "v1.9.1"
 includes = ["fastlane/mise_tasks.toml"]
 
 [tasks."whisper:fetch"]
-description = "Shallow-clone the pinned whisper.cpp release into external/"
+description = "Shallow-clone the pinned whisper.cpp release into external/ and apply patches/whisper.cpp/"
 outputs = ["external/whisper.cpp/CMakeLists.txt"]
 run = '''
 set -euo pipefail
 dest="external/whisper.cpp"
+stamp="$dest/.applied-patches"
+# Tag plus hash of every patch: a changed patch re-clones like a changed tag.
+want="$WHISPER_CPP_TAG $( (cat patches/whisper.cpp/*.patch 2>/dev/null || true) | shasum -a 256 | cut -d' ' -f1)"
 if [ -d "$dest/.git" ]; then
-  current="$(git -C "$dest" describe --tags --exact-match 2>/dev/null || echo "")"
-  if [ "$current" = "$WHISPER_CPP_TAG" ]; then
-    echo "whisper.cpp already at $WHISPER_CPP_TAG"
+  have="$(cat "$stamp" 2>/dev/null || echo "")"
+  if [ "$have" = "$want" ]; then
+    echo "whisper.cpp already at $WHISPER_CPP_TAG with current patches"
     exit 0
   fi
-  echo "whisper.cpp tag mismatch (have '$current', want '$WHISPER_CPP_TAG'), re-cloning"
+  echo "whisper.cpp checkout out of date (have '$have', want '$want'), re-cloning"
   rm -rf "$dest"
 fi
 mkdir -p external
 git clone --depth 1 --branch "$WHISPER_CPP_TAG" https://github.com/ggerganov/whisper.cpp.git "$dest"
+for patch in patches/whisper.cpp/*.patch; do
+  [ -e "$patch" ] || continue
+  git -C "$dest" apply "$PWD/$patch"
+  echo "Applied $patch"
+done
+echo "$want" > "$stamp"
 '''
 
 [tasks."whisper:build"]
 description = "Build whisper-server (Metal, Release) from external/whisper.cpp"
 depends = ["whisper:fetch"]
-sources = ["external/whisper.cpp/CMakeLists.txt", "mise.toml"]
+sources = ["external/whisper.cpp/CMakeLists.txt", "mise.toml", "patches/whisper.cpp/*.patch"]
 outputs = ["external/whisper.cpp/build/bin/whisper-server", "external/whisper.cpp/build/bundle/whisper-server"]
 run = '''
 set -euo pipefail
@@ -66,7 +75,7 @@ echo "Built: $src/build/bin/whisper-server"
 quiet = true
 description = "Build whisper-server, summarized output for agents"
 depends = ["whisper:fetch"]
-sources = ["external/whisper.cpp/CMakeLists.txt", "mise.toml"]
+sources = ["external/whisper.cpp/CMakeLists.txt", "mise.toml", "patches/whisper.cpp/*.patch"]
 outputs = ["external/whisper.cpp/build/bin/whisper-server", "external/whisper.cpp/build/bundle/whisper-server"]
 run = '''scripts/ai-logged.sh --label whisper-cpp-build --diagnostic-pattern "error:|CMake Error|FAILED" -- bash -c '
 set -euo pipefail
